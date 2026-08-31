@@ -1,0 +1,98 @@
+[
+  {
+    "name": "ui-press",
+    "seconds": 1,
+    "prompt": "Short crisp UI button press: a small plastic key click with a soft electronic blip, snappy attack, very short decay, no reverb.",
+    "event": "ui-press"
+  },
+  {
+    "name": "ui-back",
+    "seconds": 1,
+    "prompt": "Soft UI back-navigation click: a muted plastic tap slightly lower in pitch than a confirm click, quick and dry, no reverb tail.",
+    "event": "ui-back"
+  },
+  {
+    "name": "invalid-action",
+    "seconds": 1,
+    "prompt": "Dull rejected-action thud: two low wooden knocks on a hollow console in quick succession, muted and short, conveying refusal.",
+    "event": "invalid"
+  },
+  {
+    "name": "ship-place",
+    "seconds": 1,
+    "prompt": "Heavy game piece placed on a board: a solid mechanical clunk of a metal model ship set onto a hard chart table, with a faint spring latch.",
+    "event": "place"
+  },
+  {
+    "name": "rotate-tick",
+    "seconds": 1,
+    "prompt": "Quick ratchet tick: a small metal dial or gear rotating one notch, single sharp mechanical click, bright and very short.",
+    "event": "rotate"
+  },
+  {
+    "name": "torpedo-fire",
+    "seconds": 1,
+    "prompt": "Torpedo launch: a pressurized burst followed by a rising whoosh of a projectile leaving a tube, airy rush building quickly then cut off.",
+    "event": "fire"
+  },
+  {
+    "name": "splash-miss",
+    "seconds": 1,
+    "prompt": "Object plunging into open water: a full splash with initial plunge, sloshing water, and droplets settling, natural and unprocessed.",
+    "event": "splash"
+  },
+  {
+    "name": "hull-hit",
+    "seconds": 2,
+    "prompt": "Projectile striking a steel ship hull: sharp metallic clang layered over a deep booming impact, brief ringing resonance fading out.",
+    "event": "hit"
+  },
+  {
+    "name": "ship-sunk",
+    "seconds": 2,
+    "prompt": "Ship sinking: a heavy explosion followed by groaning metal, rushing water, and deep gurgling bubbles as the vessel goes under.",
+    "event": "sunk"
+  },
+  {
+    "name": "mine-detonation",
+    "seconds": 2,
+    "prompt": "Naval mine detonating: sudden harsh underwater explosion with a deep pressure thump, turbulent water rumble, and falling debris spray.",
+    "event": "mine"
+  },
+  {
+    "name": "turn-chime",
+    "seconds": 1,
+    "prompt": "Soft two-tone notification chime: gentle struck glass or vibraphone notes rising, clear and polite, signaling it is your turn.",
+    "event": "turn"
+  },
+  {
+    "name": "countdown-blip",
+    "seconds": 1,
+    "prompt": "Single countdown beep: one clean short electronic ping, round attack, medium pitch, precise and unobtrusive.",
+    "event": "countdown"
+  },
+  {
+    "name": "victory-fanfare",
+    "seconds": 3,
+    "prompt": "Short victory fanfare: bright brass and bell tones rising in a triumphant five-note flourish, celebratory, ending on a held high note.",
+    "event": "victory"
+  },
+  {
+    "name": "defeat-motif",
+    "seconds": 2,
+    "prompt": "Somber defeat motif: low muted horn notes descending slowly, hollow and heavy, fading into a quiet low drone.",
+    "event": "defeat"
+  },
+  {
+    "name": "lesson-complete",
+    "seconds": 1,
+    "prompt": "Cheerful task-complete jingle: two bright ascending mallet notes, light and encouraging, clean short decay.",
+    "event": "lesson-done"
+  },
+  {
+    "name": "achievement-sparkle",
+    "seconds": 2,
+    "prompt": "Achievement sparkle: a rapid ascending glissando of tiny crystalline bell tones with a shimmering glockenspiel shimmer, light and magical.",
+    "event": "achievement"
+  }
+]

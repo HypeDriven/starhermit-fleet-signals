@@ -1,8 +1,12 @@
 /**
- * Fleet Signals — fully procedural WebAudio sound system.
+ * Fleet Signals — WebAudio sound system.
  *
- * No external assets: every sound is synthesized from oscillators, gain
- * envelopes, and one shared procedurally-generated brown-noise buffer.
+ * Every named effect event has a procedural synthesis fallback built from
+ * oscillators, gain envelopes, and one shared procedurally-generated
+ * brown-noise buffer. When an authored sample exists (see
+ * `sfx/manifest.json`), the event lazily fetches/decodes/caches
+ * `sfx/<name>.opus` after the user-gesture unlock and prefers the sample;
+ * synthesis runs while the sample is loading or if loading fails.
  * Importing this module has no side effects and is safe in Node (tests):
  * without `window`/`AudioContext` every method is a no-op and
  * `getState().contextState` reports `'unavailable'`.
@@ -133,9 +137,75 @@ export function createAudio() {
     return { pitch: 1 + (v - 3.5) * 0.04, cutoff: 1 + (v - 3.5) * 0.08 };
   }
 
+  // --- authored samples ---------------------------------------------------
+  //
+  // Runtime event -> sample map. Keys are existing effect event names
+  // (the `play()` switch cases below); each value names the lazy-loaded
+  // clip `sfx/<sample>.opus` backing that event and the caption text.
+  // Synthesis remains the fallback while a clip loads or after a failure.
+  const SAMPLE_EVENTS = {
+    'ui-press': { sample: 'ui-press', caption: '[ui press]' },
+    'ui-back': { sample: 'ui-back', caption: '[ui back]' },
+    'invalid': { sample: 'invalid-action', caption: '[invalid action]' },
+    'place': { sample: 'ship-place', caption: '[ship placed]' },
+    'rotate': { sample: 'rotate-tick', caption: '[rotate]' },
+    'fire': { sample: 'torpedo-fire', caption: '[shot fired]' },
+    'splash': { sample: 'splash-miss', caption: '[splash — miss]' },
+    'hit': { sample: 'hull-hit', caption: '[impact — hit]' },
+    'sunk': { sample: 'ship-sunk', caption: '[ship sunk]' },
+    'mine': { sample: 'mine-detonation', caption: '[mine detonated]' },
+    'turn': { sample: 'turn-chime', caption: '[your turn]' },
+    'countdown': { sample: 'countdown-blip', caption: '[countdown]' },
+    'victory': { sample: 'victory-fanfare', caption: '[victory fanfare]' },
+    'defeat': { sample: 'defeat-motif', caption: '[defeat]' },
+    'lesson-done': { sample: 'lesson-complete', caption: '[lesson complete]' },
+    'achievement': { sample: 'achievement-sparkle', caption: '[achievement unlocked]' },
+  };
+
+  /** @type {Record<string, AudioBuffer>} decoded clip cache (basename -> buffer) */
+  const sampleBuffers = {};
+  /** @type {Record<string, Promise<void>>} in-flight/attempted loads, deduped */
+  const sampleLoads = {};
+
+  /** Lazily fetch + decode `sfx/<name>.opus` once; failures fall back to synthesis. */
+  function ensureSampleLoaded(name) {
+    if (sampleLoads[name] || sampleBuffers[name]) return;
+    sampleLoads[name] = fetch(`sfx/${name}.opus`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`sfx ${name}: HTTP ${res.status}`);
+        return res.arrayBuffer();
+      })
+      .then((bytes) => ctx.decodeAudioData(bytes))
+      .then((buf) => { sampleBuffers[name] = buf; })
+      .catch(() => { /* keep the promise cached; synthesis stays the fallback */ });
+  }
+
+  /**
+   * Play a cached sample on the effects bus (inherits mute/volume).
+   * @returns {boolean} true when the sample was played.
+   */
+  function playSample(name) {
+    const buf = sampleBuffers[name];
+    if (!buf) return false;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(busGains.effects);
+    src.start();
+    return true;
+  }
+
   /** @param {string} name @param {{variant?: number}} [opts] */
   function play(name, opts = {}) {
     if (!ctx || ctx.state !== 'running') return;
+    const sample = SAMPLE_EVENTS[name];
+    if (sample) {
+      ensureSampleLoaded(sample.sample);
+      if (playSample(sample.sample)) {
+        caption(sample.caption);
+        return;
+      }
+      // Not loaded yet or failed: fall through to procedural synthesis.
+    }
     const { pitch, cutoff } = variantShift(opts.variant ?? 0);
     const t = now();
     const fx = 'effects';
@@ -416,6 +486,8 @@ export function createAudio() {
     ctx = null;
     master = null;
     noiseBuf = null;
+    for (const key of Object.keys(sampleBuffers)) delete sampleBuffers[key];
+    for (const key of Object.keys(sampleLoads)) delete sampleLoads[key];
     captionSink = null;
   }
 
