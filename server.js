@@ -11,11 +11,18 @@ import {
   createMatch, applyCommand, scoreMatch, RuleError,
   currentPlayer, getPlayer,
 } from './src/rules/engine.js';
+import { pathToFileURL } from 'node:url';
 
 const DEFAULT_DEADLINE_MS = 24 * 60 * 60 * 1000; // per-turn, 24h
 const MAX_PAYLOAD_BYTES = 4096;
 const RATE_LIMIT_MAX = 20;        // messages
 const RATE_LIMIT_WINDOW_MS = 10000;
+
+const _utf8Encoder = new TextEncoder();
+/** Byte length of a UTF-8 string, matching the named byte cap. */
+function utf8Bytes(str) {
+  return _utf8Encoder.encode(str).length;
+}
 
 let sessionCounter = 0;
 
@@ -95,7 +102,7 @@ export function handleMessage(session, playerId, msg, nowMs) {
   } catch {
     return { ok: false, error: 'malformed' };
   }
-  if (payload.length > MAX_PAYLOAD_BYTES) return { ok: false, error: 'payload-too-large' };
+  if (utf8Bytes(payload) > MAX_PAYLOAD_BYTES) return { ok: false, error: 'payload-too-large' };
   if (!isMember(session, playerId)) return { ok: false, error: 'not-a-member' };
   if (!checkRateLimit(session, playerId, now)) return { ok: false, error: 'rate-limited' };
 
@@ -131,27 +138,42 @@ export function handleMessage(session, playerId, msg, nowMs) {
 }
 
 /**
- * Authoritative per-turn timeout. If the current player's deadline has
- * passed during the battle phase, resign them and advance the match.
+ * Authoritative per-turn timeout. If a player's stored deadline has
+ * elapsed, resign them and advance the match. In battle this is the
+ * current player's turn; in placement it is any unplaced, alive player
+ * whose own deadline has passed (placement is turn-taking, so the phase
+ * must also be enforced and not stall forever).
  * @returns {{timedOut: string}|null}
  */
 export function checkDeadline(session, nowMs) {
   const now = typeof nowMs === 'number' ? nowMs : Date.now();
   const state = session.state;
-  if (state.phase !== 'battle') return null;
-  const cur = currentPlayer(state);
-  if (!cur) return null;
-  const deadline = session.deadlines[cur.id];
+  if (state.phase === 'finished') return null;
+
+  let target = null;
+  if (state.phase === 'battle') {
+    const cur = currentPlayer(state);
+    if (cur && cur.alive) target = cur;
+  } else if (state.phase === 'placement') {
+    for (const p of state.players) {
+      if (!p.alive || p.placed) continue;
+      const d = session.deadlines[p.id];
+      if (typeof d === 'number' && now > d) { target = p; break; }
+    }
+  }
+  if (!target) return null;
+
+  const deadline = session.deadlines[target.id];
   if (typeof deadline !== 'number' || now <= deadline) return null;
 
-  const command = { type: 'resign', playerId: cur.id, id: `timeout-${cur.id}-${state.tick}` };
+  const command = { type: 'resign', playerId: target.id, id: `timeout-${target.id}-${state.tick}` };
   const applied = applyCommand(state, command);
   session.state = applied.state;
   session.seenCommandIds.add(command.id);
-  session.moves.push({ tick: session.state.tick, playerId: cur.id, command });
+  session.moves.push({ tick: session.state.tick, playerId: target.id, command });
   refreshDeadline(session, now);
   finalizeIfFinished(session, now);
-  return { timedOut: cur.id };
+  return { timedOut: target.id };
 }
 
 /**
@@ -187,4 +209,57 @@ export function sessionSummary(session) {
     currentPlayerId: cur ? cur.id : null,
     result: session.result,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* runnable host — only when this module is executed directly          */
+/* ------------------------------------------------------------------ */
+
+async function startHost() {
+  const { createServer } = await import('node:http');
+  const { readFile } = await import('node:fs/promises');
+  const { extname, join, normalize } = await import('node:path');
+  const { pathToFileURL } = await import('node:url');
+
+  const ROOT = process.cwd();
+  const MIME = {
+    '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
+    '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
+    '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg',
+    '.opus': 'audio/ogg', '.glb': 'model/gltf-binary', '.woff2': 'font/woff2',
+  };
+
+  const server = createServer(async (req, res) => {
+    try {
+      const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+      if (path.startsWith('/api/')) {
+        // The offline-tolerant platform adapter's endpoints.
+        if (path === '/api/v1/time') {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ time: Date.now() }));
+        }
+        res.writeHead(204); // telemetry / presence and any other api route
+        return res.end();
+      }
+      const file = normalize(join(ROOT, path === '/' ? '/index.html' : path));
+      if (!file.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
+      const data = await readFile(file);
+      res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
+      res.end(data);
+    } catch {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+
+  const port = Number(process.env.PORT) || 8080;
+  server.listen(port, () => {
+    console.log(`Fleet Signals hosting on http://localhost:${port}`);
+  });
+}
+
+const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+if (isMain) {
+  startHost().catch((err) => { console.error(err); process.exit(1); });
 }

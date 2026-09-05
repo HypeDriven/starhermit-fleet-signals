@@ -483,7 +483,7 @@ function cmdFire(state, player, cmd, events) {
         for (const q of state.players) {
           if (q.id === p.id) continue;
           const f = p.shotsFired[q.id] || {};
-          for (const s of q.ships) if (s.sunk && s.cells.some((c) => c in f)) sunk += 1;
+          for (const s of q.ships) if (s.sunk && s.cells.every((c) => c in f)) sunk += 1;
         }
         return sunk;
       };
@@ -590,7 +590,7 @@ export function scoreMatch(state, playerId) {
   for (const q of state.players) {
     if (q.id === playerId) continue;
     const f = p.shotsFired[q.id] || {};
-    for (const s of q.ships) if (s.sunk && s.cells.some((c) => c in f)) sunk += 1;
+    for (const s of q.ships) if (s.sunk && s.cells.every((c) => c in f)) sunk += 1;
   }
   const accuracy = p.shotsUsed > 0 ? p.hitsLanded / p.shotsUsed : 0;
   const components = [];

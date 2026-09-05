@@ -7,106 +7,67 @@ alongside the game's own unit tests and a headless-Chrome run of the shipped bro
 
 | Check | Result |
 | --- | --- |
-| `npm test` (`node tests/run.js`) | 42/42 pass, 0 failures |
+| `npm test` (`node tests/run.js`) | 42/42 pass, 0 failures (verified 2026-09-04) |
 | `node --check` on all modules (`src/**/*.js`, `server.js`, `tests/run.js`) | clean |
+| `npm run test:e2e` / `node tests/e2e.mjs` (Playwright, Chrome) | **E2E PASS** — full playthrough on desktop 1280x800 + mobile 390x844, no page errors (verified 2026-09-04) |
 | `tests/smoke.html` in headless Chrome (served on :39401) | PASS — reaches `[smoke] ALL OK`; no uncaught page errors |
 | Title-screen + interactive load in headless Chrome | Boots to the title screen and into a Practice skirmish; no JS console errors |
 | Corrupt-`localStorage` sweep (8 corruptions x 2 keys, reload each time) | PASS — no page errors, game still renders every time |
 | Rapid-input + resize stress (90 key presses, 40 clicks, 5 viewport changes, 8 pause toggles) | PASS — 0 console errors |
 
-`tests/e2e.mjs` does not exist in this game; `tests/smoke.html` is the equivalent browser suite and was
-run through headless Chrome instead.
+`tests/e2e.mjs` now exists (added 2026-09-03, exercised again 2026-09-04): a Playwright playthrough of
+the real UI (title → settings → practice match → results) on desktop and mobile viewports; both passes
+are clean. At the time of the audit above it did not exist; `tests/smoke.html` was the
+equivalent browser suite and was run through headless Chrome instead.
 
-## Confirmed defects
+## Resolved
 
-Defects below were each verified by reading the source and reproducing the behaviour.
+The five defects previously listed under **Confirmed defects** were each reproduced/confirmed against
+the source and are all now fixed in the current tree (verified 2026-09-04).
 
-### 1. Hosted match can stall forever in the `placement` phase — the per-turn deadline never fires
+### 1. Placement-phase deadline never fires — RESOLVED
 
-- **File:** `server.js:138` (`checkDeadline`)
-- **Trigger:** Create a session, have one player place their fleet, and have the second player never
-  send a `place` / `auto-place` command. Then call `checkDeadline(session, now)` with any `now`.
-- **Behaviour:** `checkDeadline` begins with `if (state.phase !== 'battle') return null;`, so the
-  authoritative timeout is only ever evaluated during battle. The session stays in `'placement'`
-  indefinitely and neither player is resigned, even though `createSession` stored a deadline for
-  every player (`for (const p of state.players) deadlines[p.id] = now + deadlineMs;`).
-- **Expected:** `spec.md` §2 requires an authoritative turn/tick model with a terminal-state reason,
-  and the file's own doc-comment describes "Authoritative per-turn timeout … resign them and advance
-  the match". Placement is a turn-taking phase with a stored deadline, so it must be enforced.
-- **Evidence:** reproduction against the real module —
+- **Fix:** `server.js` (`checkDeadline`). Removed the `if (state.phase !== 'battle') return null;`
+  early-out. The function now guards only on `finished`, and for `placement` it scans every alive,
+  unplaced player and resigns the first whose stored deadline has elapsed. Battle still targets the
+  current alive player. Lines now appear at `server.js:148-176` (selection at 153-163, command
+  construction at 169). The `battle`/`placement` branches use the same `now > d` deadline test.
+- **Verify:** unit suite (`node tests/run.js`) 42/42 pass. A `checkDeadline` call in `placement`
+  with an elapsed deadline now resigns the unplaced player and advances.
 
-  ```
-  place a: {"ok":true,...}
-  phase: placement
-  checkDeadline after 1d   -> null phase= placement
-  checkDeadline after 7d   -> null phase= placement
-  checkDeadline after 365d -> null phase= placement
-  summary: {"phase":"placement","players":[{"id":"a","placed":true},{"id":"b","placed":false}],"result":null}
-  ```
+### 2. `server.js` declared as host but started no server — RESOLVED
 
-  The session's own `deadlineMs` default is 24 h, so the deadline was 364 days in the past on the last call.
+- **Fix:** `server.js:214-265` — added a runnable host (`startHost()`) that is invoked only when the
+  module is executed directly (`isMain` guard at 262-264). It serves static files plus the
+  `/api/v1/time` endpoint (200 JSON); all other `/api/*` routes return 204, matching the
+  offline-tolerant platform adapter. `starhermit.txt` remains `server=server.js`, which is now correct.
+- **Verify:** `PORT=39777 node server.js` then `curl /api/v1/time` → `{"time":...}`; `/` returns
+  `index.html`; a missing file returns 404.
 
-### 2. `server.js` is declared as the StarHermit host but starts no server
+### 3. Payload cap counted UTF-16 code units, not bytes — RESOLVED
 
-- **File:** `starhermit.txt` (`server=server.js`) vs `server.js:1-190`
-- **Trigger:** `node server.js` (or `PORT=39401 node server.js`) as the packaging manifest implies.
-- **Behaviour:** the process exits immediately with code 0 and nothing listens. `server.js` is a pure
-  ESM library of `createSession` / `handleMessage` / `checkDeadline` / `getSnapshot` / `sessionSummary`
-  exports with no `http.createServer`, no `listen`, and no top-level side effect.
-- **Expected:** either the manifest should not name `server.js` as the host, or the file should expose
-  a runnable host. Every other game in this batch (`glow-strikers`, `gravity-hollow`, `jewel-cascade`,
-  `market-manager`, `metro-dash`, `number-mahjong`, `open-cells`) ships a `server.js` that actually listens.
-- **Evidence:** `node server.js` → `exit=0`, no listener; `package.json` has no `start` script and its
-  `serve` script is `python3 -m http.server 8080`, which cannot answer the `/api/v1/*` routes the
-  client calls (`src/main.js:30` `GET /api/v1/time`, `src/main.js:57` `POST /api/v1/presence`). Under
-  the documented serve command those return 404 / 501, observed in the headless run.
+- **Fix:** `server.js:21-25` added a `utf8Bytes()` helper using `TextEncoder`; `handleMessage` now
+  checks `utf8Bytes(payload) > MAX_PAYLOAD_BYTES` at `server.js:105` instead of `payload.length`.
+- **Verify:** multi-byte payloads are now measured in UTF-8 bytes and rejected at the true 4096-byte
+  ceiling.
 
-### 3. Payload size limit counts UTF-16 code units, not bytes
+### 4. Ships-sunk bonus credited to every player who merely hit the ship — RESOLVED
 
-- **File:** `server.js:99` (`handleMessage`), constant `MAX_PAYLOAD_BYTES = 4096` at `server.js:16`
-- **Trigger:** send a `command` message whose string fields contain multi-byte characters, e.g. 4096
-  CJK characters.
-- **Behaviour:** `const payload = JSON.stringify(msg); if (payload.length > MAX_PAYLOAD_BYTES) …`.
-  `String.prototype.length` counts UTF-16 code units, so 4096 CJK characters (`.length === 4096`,
-  12 288 bytes in UTF-8) pass a limit whose name and doc-comment both say "bytes"
-  (`* type 'command' | 'ping' and a serialized length <= 4096 bytes.`). The effective byte ceiling is
-  up to 3× the intended one.
-- **Expected:** measure with `Buffer.byteLength(payload, 'utf8')` / `TextEncoder`.
-- **Evidence:** source as quoted; independently flagged by the model review and confirmed by reading.
+- **Fix:** `src/rules/engine.js:486` and `:593` — changed `s.cells.some((c) => c in f)` to
+  `s.cells.every((c) => c in f)` in both the move-limit winner selection and `scoreMatch`, so the
+  `sunk` bonus is credited only to the player who hit **every** cell of the sunk ship.
+- **Verify:** in the scripted 3-player case the grazer (A, 1 of 5 cells) now scores **no** sunk
+  bonus; the finisher (C, all cells) scores it once.
 
-### 4. Ships-sunk bonus is credited to every player who merely hit the ship
+### 5. Pause → Settings → Done → Resume destroyed the in-match HUD — RESOLVED
 
-- **File:** `src/rules/engine.js:593` (`scoreMatch`), same expression at `src/rules/engine.js:486`
-  (move-limit winner selection)
-- **Trigger:** a 3- or 4-player skirmish in which one player hits a single cell of an enemy ship and a
-  different player finishes it.
-- **Behaviour:**
-
-  ```js
-  for (const s of q.ships) if (s.sunk && s.cells.some((c) => c in f)) sunk += 1;
-  ```
-
-  `f` is *this* player's `shotsFired` map for that opponent, so `some` asks "did I hit **any** cell of
-  a ship that is now sunk", not "did I sink it". Every player who grazed the ship receives the full
-  `SCORE_TABLE.sunk` bonus, and the summed "Ships sunk" across players can exceed the number of ships
-  on the board. The same expression decides the winner when the move limit expires.
-- **Expected:** `every` — the bonus is labelled `Ships sunk (n)` in the results breakdown
-  (`src/rules/engine.js:599`) and `spec.md` §2 requires results to "show a component breakdown rather
-  than one unexplained total", i.e. components that mean what they say. The spec also states the game
-  supports "2–4 players depending on ruleset", and `createSession` accepts 2-4, so multi-player is a
-  shipped configuration.
-- **Evidence:** scripted 3-player match against the real engine —
-
-  ```
-  B's ship "sentinel" occupies 5 cells: [ 9, 17, 25, 33, 41 ]
-  A fires at exactly 1 of those 5 cells; C then fires at all 5.
-  ship sunk? true
-  A fired at 1 of 5 cells -> {"key":"sunk","label":"Ships sunk (1)","points":100}
-  C fired at all cells    -> {"key":"sunk","label":"Ships sunk (1)","points":100}
-  ```
-
-  In a strict 2-player duel `some` and `every` coincide (only one player can be shooting at that
-  fleet), which is why the 42-assertion suite does not catch it.
+- **Fix:** `src/ui/app.js`. `overlay()` (`:135-140`) now accepts a DOM node as well as an HTML string.
+  `showSettings` (`:587-603`) detects an in-progress match via `this.ui.querySelector('.game-root')`
+  and, when in-match, renders the settings screen as an overlay on top of the still-mounted game
+  instead of calling `mount()` (which wiped `#ui`); only on the title screen does it mount like any
+  other screen. `Done` removes the overlay and returns; Pause→Resume keeps the HUD/tray/rails intact.
+- **Verify:** e2e still pauses/resumes with `#tray` present (see table), and the settings-from-pause
+  path now keeps `#hud-objective` and `#tray` mounted.
 
 ## Suspected — not confirmed
 

@@ -148,7 +148,9 @@ export class App {
   onCleanup(fn) { this.cleanupFns.push(fn); }
 
   overlay(html, { focus = true } = {}) {
-    const o = el(`<div class="overlay" role="dialog" aria-modal="true">${html}</div>`);
+    const o = el(`<div class="overlay" role="dialog" aria-modal="true"></div>`);
+    if (typeof html === 'string') o.innerHTML = html;
+    else o.appendChild(html);
     this.ui.appendChild(o);
     if (focus) {
       this.lastFocus = document.activeElement;
@@ -579,12 +581,26 @@ export class App {
       this.persist();
       this.platform.track('settings-change', { key });
     });
+    // From inside a live match the settings screen must overlay the game
+    // (which stays mounted) so that returning to Pause → Resume keeps the
+    // HUD/tray/rails intact; on the title screen it mounts like any screen.
+    const inMatch = !!this.ui.querySelector('.game-root');
+    let settingsOverlay = null;
     node.addEventListener('click', (ev) => {
       const act = ev.target.closest('[data-act]')?.dataset.act;
-      if (act === 'done') { this.play('ui-back'); returnTo(); }
+      if (act === 'done') {
+        this.play('ui-back');
+        if (settingsOverlay) settingsOverlay.remove();
+        returnTo();
+      }
       if (act === 'replay-tutorial') { this.play('ui-press'); this.startLesson(LESSONS[0]); }
     });
-    this.mount(node);
+    if (inMatch) {
+      node.classList.remove('dim'); // the .overlay backdrop already dims
+      settingsOverlay = this.overlay(node);
+    } else {
+      this.mount(node);
+    }
   }
 
   /* ================= help ================= */
