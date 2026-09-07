@@ -285,6 +285,31 @@ test('legal actions: 3-player skirmish lists every living target', () => {
   eq(E.currentPlayer(s).id, 'a');
 });
 
+test('resign during placement: last unplaced seat leaving still opens battle', () => {
+  const s = E.createMatch({
+    seed: 'pr1', gridSize: 8, fleetId: 'patrol',
+    players: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+  });
+  E.applyCommand(s, { type: 'auto-place', playerId: 'a' });
+  E.applyCommand(s, { type: 'auto-place', playerId: 'b' });
+  E.applyCommand(s, { type: 'resign', playerId: 'c' });
+  eq(s.phase, 'battle');
+  assert(E.currentPlayer(s).alive, 'current seat must be alive');
+  assert(E.listLegalActions(s, 'a').some((x) => x.type === 'fire'), 'match must not deadlock');
+});
+test('resign during placement: opening seat leaving hands the turn on', () => {
+  const s = E.createMatch({
+    seed: 'pr2', gridSize: 8, fleetId: 'patrol',
+    players: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+  });
+  E.applyCommand(s, { type: 'resign', playerId: 'a' });
+  E.applyCommand(s, { type: 'auto-place', playerId: 'b' });
+  E.applyCommand(s, { type: 'auto-place', playerId: 'c' });
+  eq(s.phase, 'battle');
+  eq(E.currentPlayer(s).id, 'b');
+  assert(E.listLegalActions(s, 'b').some((x) => x.type === 'fire'), 'match must not deadlock');
+});
+
 /* ==================== scoring ==================== */
 
 test('scoring: component breakdown sums to total', () => {

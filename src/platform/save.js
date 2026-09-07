@@ -134,9 +134,12 @@ export function mergeSaves(local, remote) {
 
 /** Append a leaderboard entry, keep score-desc order, cap at 100. */
 export function recordBoardEntry(doc, entry) {
+  // A checksum-valid but hand-edited doc may be missing the board; the
+  // checksum only detects corruption, it does not prove the shape.
+  if (!doc.boards || !Array.isArray(doc.boards.entries)) doc.boards = { entries: [] };
   const entries = doc.boards.entries;
   entries.push(entry);
-  entries.sort((a, b) => b.score - a.score);
+  entries.sort((a, b) => (b?.score || 0) - (a?.score || 0));
   if (entries.length > BOARD_ENTRY_CAP) entries.length = BOARD_ENTRY_CAP;
   return doc;
 }
@@ -154,6 +157,7 @@ const ACHIEVEMENT_KEYS = new Set(ACHIEVEMENTS.map((a) => a.key));
 /** Idempotent unlock; true only on first unlock, false for unknown keys. */
 export function unlockAchievement(doc, key) {
   if (!ACHIEVEMENT_KEYS.has(key)) return false;
+  if (!doc.achievements || typeof doc.achievements !== 'object') doc.achievements = {};
   if (doc.achievements[key]) return false;
   doc.achievements[key] = new Date().toISOString();
   return true;

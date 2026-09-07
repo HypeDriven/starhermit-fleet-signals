@@ -17,6 +17,7 @@ const DEFAULT_DEADLINE_MS = 24 * 60 * 60 * 1000; // per-turn, 24h
 const MAX_PAYLOAD_BYTES = 4096;
 const RATE_LIMIT_MAX = 20;        // messages
 const RATE_LIMIT_WINDOW_MS = 10000;
+const MAX_SEEN_COMMAND_IDS = 512;  // mirrors the engine's own replay-guard cap
 
 const _utf8Encoder = new TextEncoder();
 /** Byte length of a UTF-8 string, matching the named byte cap. */
@@ -53,6 +54,15 @@ export function createSession(config, options = {}) {
     seenCommandIds: new Set(),
     rateLimits: {}, // playerId -> [timestamps]
   };
+}
+
+/** Record an accepted command id, evicting the oldest beyond the cap. */
+function rememberCommandId(session, id) {
+  session.seenCommandIds.add(id);
+  while (session.seenCommandIds.size > MAX_SEEN_COMMAND_IDS) {
+    const oldest = session.seenCommandIds.values().next().value;
+    session.seenCommandIds.delete(oldest);
+  }
 }
 
 function isMember(session, playerId) {
@@ -111,16 +121,17 @@ export function handleMessage(session, playerId, msg, nowMs) {
   }
   if (msg.type !== 'command') return { ok: false, error: 'malformed' };
 
-  const command = msg.command;
-  if (!command || typeof command !== 'object' || typeof command.id !== 'string' || !command.id) {
+  const incoming = msg.command;
+  if (!incoming || typeof incoming !== 'object' || typeof incoming.id !== 'string' || !incoming.id) {
     return { ok: false, error: 'malformed' };
   }
   // Idempotent duplicate rejection.
-  if (session.seenCommandIds.has(command.id)) {
+  if (session.seenCommandIds.has(incoming.id)) {
     return { ok: true, duplicate: true, events: [] };
   }
   // The sender is authoritative for identity; clients cannot spoof actors.
-  command.playerId = playerId;
+  // Work on a copy so the transport's own message object is left untouched.
+  const command = { ...incoming, playerId };
 
   let applied;
   try {
@@ -130,7 +141,7 @@ export function handleMessage(session, playerId, msg, nowMs) {
     throw err;
   }
   session.state = applied.state;
-  session.seenCommandIds.add(command.id);
+  rememberCommandId(session, command.id);
   session.moves.push({ tick: session.state.tick, playerId, command });
   refreshDeadline(session, now);
   finalizeIfFinished(session, now);
@@ -169,7 +180,7 @@ export function checkDeadline(session, nowMs) {
   const command = { type: 'resign', playerId: target.id, id: `timeout-${target.id}-${state.tick}` };
   const applied = applyCommand(state, command);
   session.state = applied.state;
-  session.seenCommandIds.add(command.id);
+  rememberCommandId(session, command.id);
   session.moves.push({ tick: session.state.tick, playerId: target.id, command });
   refreshDeadline(session, now);
   finalizeIfFinished(session, now);
@@ -218,8 +229,7 @@ export function sessionSummary(session) {
 async function startHost() {
   const { createServer } = await import('node:http');
   const { readFile } = await import('node:fs/promises');
-  const { extname, join, normalize } = await import('node:path');
-  const { pathToFileURL } = await import('node:url');
+  const { extname, join, normalize, sep } = await import('node:path');
 
   const ROOT = process.cwd();
   const MIME = {
@@ -243,7 +253,9 @@ async function startHost() {
         return res.end();
       }
       const file = normalize(join(ROOT, path === '/' ? '/index.html' : path));
-      if (!file.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
+      // Must stay inside ROOT itself — a bare prefix test would also accept
+      // a sibling directory whose name starts with ROOT.
+      if (file !== ROOT && !file.startsWith(ROOT + sep)) { res.writeHead(403); return res.end(); }
       const data = await readFile(file);
       res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
       res.end(data);

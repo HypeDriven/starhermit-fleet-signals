@@ -394,12 +394,24 @@ function cmdPlace(state, player, cmd, events, auto) {
   player.ships = v.ships;
   player.placed = true;
   events.push({ type: 'placed', playerId: player.id, placements });
-  if (state.players.every((p) => p.placed || !p.alive)) {
-    state.phase = 'battle';
-    state.pendingShots = shotsForTurn(state, currentPlayer(state));
-    events.push({ type: 'phase', phase: 'battle' });
-    state.log.push({ tick: state.tick, text: 'All fleets deployed. Battle stations.' });
-  }
+  beginBattleIfReady(state, events);
+}
+
+/**
+ * Open the battle phase once every surviving player has deployed.
+ * Called after a placement and after a placement-phase resignation, so a
+ * seat that leaves during deployment can never strand the match.
+ */
+function beginBattleIfReady(state, events) {
+  if (state.phase !== 'placement') return;
+  if (!state.players.every((p) => p.placed || !p.alive)) return;
+  state.phase = 'battle';
+  // The opening seat must be alive: a player who resigned during
+  // deployment may still hold currentPlayerIndex.
+  if (!currentPlayer(state) || !currentPlayer(state).alive) advanceTurn(state);
+  state.pendingShots = shotsForTurn(state, currentPlayer(state));
+  events.push({ type: 'phase', phase: 'battle' });
+  state.log.push({ tick: state.tick, text: 'All fleets deployed. Battle stations.' });
 }
 
 function shotsForTurn(state, player) {
@@ -538,6 +550,9 @@ function cmdResign(state, player, events) {
   } else if (state.phase === 'battle' && currentPlayer(state).id === player.id) {
     advanceTurn(state);
     state.pendingShots = shotsForTurn(state, currentPlayer(state));
+  } else {
+    // Deployment: the remaining captains may now all be deployed.
+    beginBattleIfReady(state, events);
   }
 }
 

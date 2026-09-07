@@ -1,5 +1,45 @@
 # Known Issues — Fleet Signals
 
+## Review pass 2026-09-07 (Claude Opus 5)
+
+`npm test` 44/44 pass · `npm run test:e2e` PASS (desktop + mobile + new hosted-roster pass) ·
+`node --check` clean on every module. Defects found and fixed in this pass:
+
+1. **Resigning during deployment deadlocked 3–4 player matches** (`src/rules/engine.js`).
+   With three seats, `a` and `b` deployed and `c` resigning left the match in `placement`
+   forever — `listLegalActions` returned `[]` for everyone. Conversely, a seat resigning
+   *before* deploying could still hold `currentPlayerIndex` when battle opened, so the turn
+   belonged to a dead player and nobody could fire. Placement now ends through a shared
+   `beginBattleIfReady()` reached from both `cmdPlace` and `cmdResign`, and the opening seat
+   is advanced past any resigned player. Covered by two new tests in `tests/run.js`.
+2. **Retry after a hosted match threw** (`src/ui/app.js`). The results screen called
+   `startMatch('hosted', …)` without a roster and `opts.seats.map` was a `TypeError`.
+   It now falls back to the lobby roster (and returns to the lobby if there is none).
+3. **Hosted lobby could build a roster with duplicate seat ids** (`src/ui/app.js`).
+   Removing a seat then adding one reused an existing `pN`, and `createMatch` rejected the
+   match with `duplicate player id`. Ids are now allocated from the first free slot.
+4. **Pause → Help → Done destroyed the in-match HUD** — the same defect fixed for Settings
+   (below, #5) applied to Help, which still called `mount()`. Both now go through
+   `_presentScreen()`, which overlays when a match is mounted.
+5. **Esc did not close the pause menu** although the manual documents "Esc — pause / cancel".
+   Esc now toggles it, `showPause()` refuses to stack, and resuming cannot start a second AI
+   pump loop alongside the one already ticking (`_aiPumpPending`, plus a stale-session guard
+   so a pending AI tick can never act on a match that was replaced meanwhile).
+6. **Retry/Restart lost the chosen opponent and assists**; both now reuse `_retryOpts()`, and
+   Learn-mode retry restarts the lesson runner instead of the bare match.
+7. **`index.html` shipped two `rel="icon"` links** — the later placeholder data-URI overrode
+   the game's own `favicon.svg`. Removed; `icon.png` is now offered as the touch icon.
+8. Previously "suspected" items, all now hardened: `recordBoardEntry`/`unlockAchievement`
+   tolerate a hand-edited save that is missing `boards`/`achievements`; the server's
+   `seenCommandIds` set is capped at 512 like the engine's; `handleMessage` copies the
+   command instead of mutating the transport's message object; and the dev host's
+   containment check compares against `ROOT + sep` so a sibling directory sharing the prefix
+   cannot be served.
+
+`LICENSE.md` (PolyForm Noncommercial 1.0.0) was missing from the repo root and has been added.
+
+---
+
 QA pass 2026-08-20. Static review driven by Qwen3.8 27B on `worker186` (HauhauCS Q3_K_P, 16k ctx),
 alongside the game's own unit tests and a headless-Chrome run of the shipped browser smoke suite.
 

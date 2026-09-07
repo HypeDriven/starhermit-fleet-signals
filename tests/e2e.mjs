@@ -173,6 +173,27 @@ async function runPass({ name, viewport, hasTouch }) {
       if (!(await page.locator('#tray').count())) throw new Error('HUD tray missing after resume');
     });
 
+    await step('pause → help → done → resume keeps HUD intact', async () => {
+      await page.click('[data-hud="pause"]');
+      await page.waitForSelector('.overlay [data-act="help"]');
+      await page.click('.overlay [data-act="help"]');
+      await page.waitForSelector('.kbd-table');
+      await page.click('[data-act="done"]');
+      await page.waitForSelector('.overlay [data-act="resume"]');
+      await page.click('.overlay [data-act="resume"]');
+      await page.waitForSelector('.overlay', { state: 'detached' });
+      if (!(await page.locator('#tray').count())) throw new Error('HUD tray missing after help');
+      if (!(await page.locator('#hud-objective').count())) throw new Error('HUD objective missing after help');
+    });
+
+    await step('Escape opens and closes the pause menu', async () => {
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('.overlay [data-act="resume"]');
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('.overlay', { state: 'detached' });
+      if (await page.evaluate(() => window.__fleet.app.paused)) throw new Error('still paused after Escape');
+    });
+
     await step('play the battle out to a terminal result', async () => {
       let guard = 0;
       for (;;) {
@@ -207,10 +228,45 @@ async function runPass({ name, viewport, hasTouch }) {
   if (errors.length) throw new Error(`[${name}] page errors:\n` + errors.join('\n'));
 }
 
+/**
+ * Hosted table (local pass-and-play) roster handling: seats must keep unique
+ * ids after a removal, or createMatch rejects the roster and the screen dies.
+ */
+async function runHostedPass() {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('console', (m) => {
+    if (m.type() === 'error' && !browserNoise.test(m.text())) errors.push(`console: ${m.text()}`);
+  });
+  try {
+    await page.goto(BASE, { waitUntil: 'load' });
+    await page.waitForSelector('.game-title', { timeout: 15000 });
+    await page.click('button[data-act="hosted"]');
+    await page.waitForSelector('[data-act="start"]');
+    await page.click('[data-act="add"]');                 // 3 seats
+    await page.click('[data-seat-drop="0"]');             // drop the first
+    await page.click('[data-act="add"]');                 // re-add: ids must not collide
+    const ids = await page.evaluate(() => window.__fleet.app.lobbySeats.map((s) => s.id));
+    if (new Set(ids).size !== ids.length) throw new Error(`duplicate seat ids: ${ids}`);
+    for (const i of [0, 1, 2]) await page.click(`[data-seat-ready="${i}"]`);
+    await page.click('[data-act="start"]');
+    await page.waitForSelector('[data-tact="auto"]', { timeout: 10000 });
+    const n = await page.evaluate(() => window.__fleet.app.session.state.players.length);
+    if (n !== 3) throw new Error(`expected a 3-seat hosted match, got ${n}`);
+    console.log('ok - [hosted] roster edit → 3-seat match starts');
+  } finally {
+    await context.close();
+  }
+  if (errors.length) throw new Error('[hosted] page errors:\n' + errors.join('\n'));
+}
+
 try {
   await runPass({ name: 'desktop', viewport: { width: 1280, height: 800 }, hasTouch: false });
   await runPass({ name: 'mobile', viewport: { width: 390, height: 844 }, hasTouch: true });
-  console.log('\nE2E PASS — full Fleet Signals playthrough clean on desktop + mobile, no page errors');
+  await runHostedPass();
+  console.log('\nE2E PASS — full Fleet Signals playthrough clean on desktop + mobile + hosted roster, no page errors');
 } finally {
   await browser.close();
   server.close();

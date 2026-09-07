@@ -436,7 +436,11 @@ export class App {
       if (dropBtn) { seats.splice(Number(dropBtn.dataset.seatDrop), 1); this.showLobby(); return; }
       const act = ev.target.closest('[data-act]')?.dataset.act;
       if (act === 'add' && seats.length < 4) {
-        seats.push({ id: 'p' + (seats.length + 1), name: 'Captain ' + (seats.length + 1), ready: false });
+        // Seat ids must stay unique after removals, or createMatch rejects
+        // the roster with 'duplicate player id'.
+        let n = 1;
+        while (seats.some((s) => s.id === 'p' + n)) n += 1;
+        seats.push({ id: 'p' + n, name: 'Captain ' + n, ready: false });
         this.showLobby();
       }
       if (act === 'start') {
@@ -581,26 +585,32 @@ export class App {
       this.persist();
       this.platform.track('settings-change', { key });
     });
-    // From inside a live match the settings screen must overlay the game
-    // (which stays mounted) so that returning to Pause → Resume keeps the
-    // HUD/tray/rails intact; on the title screen it mounts like any screen.
-    const inMatch = !!this.ui.querySelector('.game-root');
-    let settingsOverlay = null;
+    const dismiss = this._presentScreen(node);
     node.addEventListener('click', (ev) => {
       const act = ev.target.closest('[data-act]')?.dataset.act;
       if (act === 'done') {
         this.play('ui-back');
-        if (settingsOverlay) settingsOverlay.remove();
+        dismiss();
         returnTo();
       }
-      if (act === 'replay-tutorial') { this.play('ui-press'); this.startLesson(LESSONS[0]); }
+      if (act === 'replay-tutorial') { this.play('ui-press'); dismiss(); this.startLesson(LESSONS[0]); }
     });
-    if (inMatch) {
-      node.classList.remove('dim'); // the .overlay backdrop already dims
-      settingsOverlay = this.overlay(node);
-    } else {
+  }
+
+  /**
+   * Show a full screen. From inside a live match it must overlay the game
+   * (which stays mounted) so Pause → Resume keeps the HUD/tray/rails
+   * intact; on the title screen it mounts like any other screen.
+   * @returns {() => void} dismiss callback (a no-op for mounted screens)
+   */
+  _presentScreen(node) {
+    if (!this.ui.querySelector('.game-root')) {
       this.mount(node);
+      return () => {};
     }
+    node.classList.remove('dim'); // the .overlay backdrop already dims
+    const o = this.overlay(node);
+    return () => o.remove();
   }
 
   /* ================= help ================= */
@@ -639,15 +649,18 @@ export class App {
           <div class="menu-row" style="margin-top:14px"><button class="primary" data-act="done">Done</button></div>
         </div>
       </div>`);
+    const dismiss = this._presentScreen(node);
     node.addEventListener('click', (ev) => {
-      if (ev.target.closest('[data-act="done"]')) { this.play('ui-back'); returnTo(); }
+      if (ev.target.closest('[data-act="done"]')) { this.play('ui-back'); dismiss(); returnTo(); }
     });
-    this.mount(node);
   }
 
   /* ================= match lifecycle ================= */
 
   sessionTeardown() {
+    clearTimeout(this._aiPumpTimer);
+    this._aiPumpTimer = null;
+    this._aiPumpPending = false;
     this.session = null;
     this.lesson = null;
     this.hotseat = null;
@@ -657,6 +670,7 @@ export class App {
     this.annotateMode = false;
     this.inputLocked = false;
     this.paused = false;
+    this.pauseOverlay = null;
   }
 
   /**
@@ -671,12 +685,15 @@ export class App {
     this.content = content;
     let config;
     if (mode === 'hosted') {
+      // Retry/restart re-enters without a roster; fall back to the lobby's.
+      const seats = opts.seats || this.lobbySeats;
+      if (!seats || seats.length < 2) { this.showLobby(); return; }
       config = {
         seed: 'hosted-' + Date.now().toString(36),
-        gridSize: 8, fleetId: 'standard', mechanics: {}, rulesetId: opts.seats.length > 2 ? 'skirmish' : 'duel',
-        players: opts.seats.map((s) => ({ id: s.id, name: s.name })),
+        gridSize: 8, fleetId: 'standard', mechanics: {}, rulesetId: seats.length > 2 ? 'skirmish' : 'duel',
+        players: seats.map((s) => ({ id: s.id, name: s.name })),
       };
-      this.hotseat = { playerIds: opts.seats.map((s) => s.id), currentViewer: null };
+      this.hotseat = { playerIds: seats.map((s) => s.id), currentViewer: null };
     } else {
       config = {
         seed: content?.seed || ('practice-' + Date.now().toString(36)),
@@ -690,7 +707,10 @@ export class App {
         ],
       };
     }
-    if (mode === 'learn') config = { ...this.lessonConfig, contentId: this.lessonConfig.id };
+    if (mode === 'learn') {
+      if (!this.lessonConfig) { this.showLearn(); return; }
+      config = { ...this.lessonConfig, contentId: this.lessonConfig.id };
+    }
     this.session = new GameSession({
       config, mode,
       assists: mode === 'practice'
@@ -703,6 +723,15 @@ export class App {
     this.platform.track('round-start', { mode, contentId: config.contentId });
     this._buildGameScreen();
     this._beginPlacement();
+  }
+
+  /** Re-launch options that keep the opponent and assists the player chose. */
+  _retryOpts() {
+    if (!this.session) return {};
+    return {
+      difficulty: this.session.config.players.find((p) => p.isAI)?.difficulty,
+      assists: { ...this.session.assists },
+    };
   }
 
   startLesson(lesson) {
@@ -1093,6 +1122,9 @@ export class App {
   }
 
   _pumpAI() {
+    // One pump loop at a time: resuming from pause (or from a hidden tab)
+    // must not start a second driver alongside the one still ticking.
+    if (this._aiPumpPending) return;
     if (!this.session || this.session.state.phase === 'finished') { this._finishIfNeeded([]); return; }
     if (!this.session.needsAI()) {
       if (this.session.state.phase === 'battle') this._startTurnForCurrent();
@@ -1101,8 +1133,13 @@ export class App {
     this.phase = 'resolving';
     this.inputLocked = true;
     this._renderTray();
-    setTimeout(() => {
-      if (!this.session) return;
+    this._aiPumpPending = true;
+    const sess = this.session;
+    this._aiPumpTimer = setTimeout(() => {
+      this._aiPumpTimer = null;
+      this._aiPumpPending = false;
+      // A pending tick must never act on a match that has since been replaced.
+      if (!this.session || this.session !== sess) return;
       if (this.paused) { this._pumpAI(); return; } // solo sim frozen while paused/hidden
       const r = this.session.stepAI();
       if (!r) { this._startTurnForCurrent(); return; }
@@ -1367,7 +1404,12 @@ export class App {
       if (!act) return;
       this.play('ui-press');
       this.closeOverlay(o);
-      if (act === 'retry') this.startMatch(this.mode, this.content, { difficulty: this.session.config.players[1]?.difficulty });
+      if (act === 'retry') {
+        // Learn mode has to restart the lesson runner, not just the match.
+        const lesson = this.mode === 'learn' ? lessonById(this.session.config.contentId) : null;
+        if (lesson) this.startLesson(lesson);
+        else this.startMatch(this.mode, this.content, this._retryOpts());
+      }
       if (act === 'next' && nextStage) this.showSetup('journey', nextStage);
       if (act === 'modes') this.showTitle();
       if (act === 'title') this.showTitle();
@@ -1378,6 +1420,7 @@ export class App {
 
   showPause() {
     if (!this.session || this.phase === 'results') return;
+    if (this.pauseOverlay && document.contains(this.pauseOverlay)) return;
     this.paused = true;
     this.play('ui-back');
     const o = this.overlay(`
@@ -1395,12 +1438,23 @@ export class App {
       const act = ev.target.closest('[data-act]')?.dataset.act;
       if (!act) return;
       this.play('ui-press');
-      if (act === 'resume') { this.paused = false; this.closeOverlay(o); }
-      if (act === 'settings') { this.closeOverlay(o); this.showSettings(() => this.showPause()); }
-      if (act === 'help') { this.closeOverlay(o); this.showHelp(() => this.showPause()); }
-      if (act === 'restart') { this.paused = false; this.closeOverlay(o); this.startMatch(this.mode, this.content, {}); }
-      if (act === 'leave') { this.paused = false; this.closeOverlay(o); this.showTitle(); }
+      if (act === 'resume') this.resumeFromPause();
+      if (act === 'settings') { this.pauseOverlay = null; this.closeOverlay(o); this.showSettings(() => this.showPause()); }
+      if (act === 'help') { this.pauseOverlay = null; this.closeOverlay(o); this.showHelp(() => this.showPause()); }
+      if (act === 'restart') { this.paused = false; this.pauseOverlay = null; this.closeOverlay(o); this.startMatch(this.mode, this.content, this._retryOpts()); }
+      if (act === 'leave') { this.paused = false; this.pauseOverlay = null; this.closeOverlay(o); this.showTitle(); }
     });
+    this.pauseOverlay = o;
+  }
+
+  /** Close the pause menu and hand control back to the match. */
+  resumeFromPause() {
+    const o = this.pauseOverlay;
+    this.pauseOverlay = null;
+    this.paused = false;
+    this.closeOverlay(o);
+    this._renderTray();
+    if (this.session?.needsAI()) this._pumpAI();
   }
 
   /* ---------------- hot-seat handover ---------------- */
@@ -1596,6 +1650,14 @@ export class App {
       if (ev.target.matches('input, select, textarea')) return;
       const st = this.session?.state;
       if (ev.key === 'Escape') {
+        // Esc is documented as "pause / cancel": it opens the pause menu and
+        // closes it again. Other overlays keep handling their own buttons.
+        if (this.pauseOverlay && document.contains(this.pauseOverlay)) {
+          this.play('ui-press');
+          this.resumeFromPause();
+          ev.preventDefault();
+          return;
+        }
         if (this.session && this.phase !== 'results' && this.phase !== 'menu') {
           if (this.ui.querySelector('.overlay')) return; // overlays handle their own buttons
           this.showPause();
