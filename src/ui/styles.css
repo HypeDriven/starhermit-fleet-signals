@@ -170,6 +170,29 @@ label { display: block; margin: 10px 0 4px; color: var(--text-dim); }
 .panel p { max-width: 70ch; }
 
 .title-panel { text-align: center; max-width: min(560px, 94vw); }
+/* Key art strip above the title; the live chart-table scene stays visible around the panel. */
+.title-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: min(26vh, 220px);
+  object-fit: cover;
+  object-position: center 60%;
+  border-radius: 10px;
+  border: 1px solid rgba(89, 230, 255, 0.35);
+  margin: 0 0 14px;
+}
+.results-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: min(22vh, 200px);
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid rgba(89, 230, 255, 0.3);
+  margin: 0 0 12px;
+}
+@media (max-height: 560px) { .title-art, .results-art { display: none; } }
 .game-title {
   font-size: calc(2.6rem * var(--font-scale));
   letter-spacing: 0.08em;

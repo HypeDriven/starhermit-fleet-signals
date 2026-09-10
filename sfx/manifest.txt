@@ -1,0 +1,26 @@
+# Fleet Signals — canonical SFX manifest. One line per clip:
+# file | event id (src/audio/audio.js SAMPLE_EVENTS key, called via App.play()) | description of the sound | usage context
+# All clips: MOSS-SoundEffect v2.0, 48 kHz mono Opus 96 kbps, loudness-normalized (-20 LUFS), 100 inference steps.
+# Every event keeps a procedural WebAudio fallback that plays while the clip loads or if the fetch fails.
+ui-press.opus | ui-press | Short crisp UI button press: small plastic key click with a soft electronic blip, snappy attack, very short decay, no reverb | Every menu/tray/overlay button confirm, target-picker taps, note-mode toggle
+ui-back.opus | ui-back | Soft UI back-navigation click: muted plastic tap slightly lower than the confirm click, quick and dry | Back/Done buttons, opening the pause menu, undo
+invalid-action.opus | invalid | Dull rejected-action thud: two low wooden knocks on a hollow console in quick succession, conveying refusal | Illegal placement, RuleError on fire/annotate, confirm with ships missing, lobby start without ready seats
+ship-place.opus | place | Heavy game piece placed on a board: solid mechanical clunk of a metal model ship set onto a hard chart table with a faint spring latch | A ship is dropped on the chart, auto-deploy fills the draft, and every 'placed' rules event
+rotate-tick.opus | rotate | Quick ratchet tick: a small metal dial rotating one notch, single sharp bright click | Rotate (R / tray button) and picking a placed ship back up
+torpedo-fire.opus | fire | Torpedo launch: pressurized burst then a rising whoosh of a projectile leaving a tube, cut off quickly | Player's fire command accepted (before the shot resolves)
+splash-miss.opus | splash | Object plunging into open water: full splash, sloshing water, droplets settling | 'shot' event with result miss (either side)
+hull-hit.opus | hit | Projectile striking a steel hull: sharp metallic clang over a deep booming impact, brief ringing | 'shot' event with result hit
+ship-sunk.opus | sunk | Ship sinking: heavy explosion, groaning metal, rushing water and deep bubbles as the vessel goes under | 'shot' event with result sunk
+mine-detonation.opus | mine | Naval mine detonating: harsh underwater explosion, deep pressure thump, turbulent water, falling spray | 'shot' event with result mine (extra shot charged)
+turn-chime.opus | turn | Soft two-tone notification chime: gentle struck glass notes rising, clear and polite | Start of the local player's turn (_enterTurn)
+countdown-blip.opus | countdown | Single countdown beep: one clean short electronic ping, round attack, medium pitch | 3-2-1 overlay between deployment and battle (skipped under reduced motion)
+victory-fanfare.opus | victory | Short victory fanfare: bright brass and bell tones rising in a five-note flourish, held high note | Results overlay when the viewer (or a hotseat winner) won
+defeat-motif.opus | defeat | Somber defeat motif: low muted horns descending slowly into a quiet drone | Results overlay on a loss or draw; also any 'resigned' rules event
+lesson-complete.opus | lesson-done | Cheerful task-complete jingle: two bright ascending mallet notes, clean short decay | Learn-mode step objective met
+achievement-sparkle.opus | achievement | Rapid ascending glissando of tiny crystalline bell tones with a glockenspiel shimmer | One or more achievements unlocked after a match
+sea-ambience.opus | ambience | Calm open ocean at night from a steel deck: rolling swell, water lapping a hull, low distant wind, seamless loop | Looped on the ambience bus from the first user gesture; replaces the synthesized brown-noise sea once decoded
+battle-stations.opus | battle-start | Naval battle-stations alert: short brass klaxon blast then one deep ship's bell strike | Battle phase opens after the countdown (_beginBattle)
+target-lock.opus | select | Targeting lock tick: short crisp sonar blip layered with a bright metallic switch click | Selecting (arming) a target cell with tap, Enter or gamepad A during battle
+sonar-hint.opus | hint | Submarine sonar ping: one clean high tone with a soft echoing tail | Hint (H / tray button) highlights the suggested coordinate
+fleet-eliminated.opus | eliminated | An entire fleet lost: slow heavy explosion into a long groaning metal collapse and deep rushing water | 'eliminated' rules event (a seat's last ship sunk, 3-4 player skirmish or final blow)
+chart-handover.opus | handover | A large paper sea chart folded and slid across a wooden table, then one soft wooden knock | Hosted-table "Pass the chart" privacy overlay between seats

@@ -182,6 +182,7 @@ export class App {
     const node = el(`
       <div class="screen" role="main" aria-label="Fleet Signals title">
         <div class="panel title-panel">
+          <img class="title-art" src="./assets/key-art.webp" alt="" aria-hidden="true" onerror="this.remove()">
           <h1 class="game-title">FLEET SIGNALS</h1>
           <p class="game-subtitle">A captain's holographic chart table. Hide your fleet. Read the water.</p>
           <div class="menu-stack">
@@ -1079,6 +1080,7 @@ export class App {
 
   _beginBattle() {
     this.phase = 'battle';
+    this.play('battle-start');
     this.scene.setView('battle');
     this._startTurnForCurrent();
   }
@@ -1236,6 +1238,7 @@ export class App {
           navigator.vibrate(ev.result === 'miss' ? 10 : 40);
         }
       } else if (ev.type === 'placed') this.play('place');
+      else if (ev.type === 'eliminated') this.play('eliminated');
       else if (ev.type === 'resigned') this.play('defeat');
     }
   }
@@ -1382,8 +1385,10 @@ export class App {
       ? STAGES[STAGES.findIndex((s) => s.id === this.content.id) + 1] : null;
     const challengeNote = this.mode === 'challenge'
       ? `<p>${this._challengePassed(res) ? '✓ Challenge goal met.' : '✗ Challenge goal missed: ' + esc(this.content.goalText)}</p>` : '';
+    const art = cls === 'win' ? 'results-win' : 'results-lose';
     const o = this.overlay(`
       <div class="panel" role="document" aria-label="Results">
+        <img class="results-art" src="./assets/${art}.webp" alt="" aria-hidden="true" onerror="this.remove()">
         <h2 class="result-headline ${cls}">${esc(headline)}</h2>
         ${this.mode === 'journey' ? `<div class="stars" aria-label="${stars} of 3 stars">${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}</div>` : ''}
         ${challengeNote}
@@ -1464,6 +1469,7 @@ export class App {
     this.scene.setInteractive(null);
     if (this.hotseat) this.hotseat.currentViewer = forPlayerId;
     this.inputLocked = true;
+    this.play('handover');
     const o = this.overlay(`
       <div class="panel" style="text-align:center">
         <h2>Pass the chart</h2>
@@ -1591,7 +1597,7 @@ export class App {
     this._renderTray();
     this.toast(`Signal analysis suggests ${cellName(hint.cell, this.session.state.gridSize)}.`, false, 3000);
     this.announce(`Hint: try ${cellName(hint.cell, this.session.state.gridSize)}.`);
-    this.play('ui-press');
+    this.play('hint');
   }
 
   _undo() {
@@ -1636,7 +1642,7 @@ export class App {
       if (this.annotateMode) { this._annotate(cell); return; }
       if (this.selectedCell === cell) { this._fire(cell); return; }
       this.selectedCell = cell;
-      this.play('ui-press');
+      this.play('select');
       const fired = st.players.find((p) => p.id === viewer)?.shotsFired[this.hotTarget] || {};
       this.scene.setCursor('main', cell, !(cell in fired));
       this._renderTray();

@@ -34,7 +34,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
-  '.png': 'image/png', '.ico': 'image/x-icon', '.wav': 'audio/wav',
+  '.png': 'image/png', '.webp': 'image/webp', '.ico': 'image/x-icon', '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.opus': 'audio/ogg',
   '.glb': 'model/gltf-binary', '.woff2': 'font/woff2', '.ts': 'text/typescript',
 };
@@ -51,7 +51,7 @@ const server = http.createServer(async (req, res) => {
     res.end(data);
   } catch { res.writeHead(404); res.end(); }
 });
-await new Promise((r) => server.listen(0, r));
+await new Promise((r) => server.listen(Number(process.env.PORT) || 0, r)); // PORT pins the port; else ephemeral
 const BASE = `http://127.0.0.1:${server.address().port}`;
 
 const browser = await chromium.launch({

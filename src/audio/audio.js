@@ -160,7 +160,15 @@ export function createAudio() {
     'defeat': { sample: 'defeat-motif', caption: '[defeat]' },
     'lesson-done': { sample: 'lesson-complete', caption: '[lesson complete]' },
     'achievement': { sample: 'achievement-sparkle', caption: '[achievement unlocked]' },
+    'battle-start': { sample: 'battle-stations', caption: '[battle stations]' },
+    'select': { sample: 'target-lock', caption: '[target selected]' },
+    'hint': { sample: 'sonar-hint', caption: '[sonar hint]' },
+    'eliminated': { sample: 'fleet-eliminated', caption: '[fleet destroyed]' },
+    'handover': { sample: 'chart-handover', caption: '[pass the chart]' },
   };
+  /** Looped sea bed on the ambience bus; replaces the synth bed once decoded. */
+  const AMBIENCE_SAMPLE = 'sea-ambience';
+  let ambSampleSrc = null;
 
   /** @type {Record<string, AudioBuffer>} decoded clip cache (basename -> buffer) */
   const sampleBuffers = {};
@@ -318,6 +326,50 @@ export function createAudio() {
         arp([1047, 1319, 1568, 2093], 0.08, 'sine', 0.1, 0.35, t);
         caption('[achievement unlocked]');
         break;
+      case 'battle-start': { // klaxon blast + bell strike
+        const o = osc('sawtooth', 196 * pitch, t, t + 0.5, env(fx, t, 0.22, 0.02, 0.42));
+        o.frequency.setValueAtTime(196 * pitch, t);
+        o.frequency.linearRampToValueAtTime(220 * pitch, t + 0.45);
+        osc('sine', 660 * pitch, t + 0.5, t + 1.6, env(fx, t + 0.5, 0.25, 0.005, 1.0));
+        osc('triangle', 1320 * pitch, t + 0.5, t + 1.1, env(fx, t + 0.5, 0.08, 0.005, 0.5));
+        caption('[battle stations]');
+        break;
+      }
+      case 'select': // sonar blip + click
+        osc('sine', 1760 * pitch, t, t + 0.09, env(fx, t, 0.12, 0.003, 0.07));
+        osc('square', 880 * pitch, t, t + 0.03, env(fx, t, 0.08, 0.002, 0.02));
+        caption('[target selected]');
+        break;
+      case 'hint': { // sonar ping with echo tail
+        osc('sine', 1568 * pitch, t, t + 0.9, env(fx, t, 0.16, 0.01, 0.8));
+        osc('sine', 1568 * pitch, t + 0.35, t + 1.1, env(fx, t + 0.35, 0.05, 0.02, 0.6));
+        caption('[sonar hint]');
+        break;
+      }
+      case 'eliminated': { // long collapse: hit + descending groan + water rush
+        play('hit', opts);
+        const o = osc('sawtooth', 110 * pitch, t + 0.2, t + 2.2, env(fx, t + 0.2, 0.18, 0.1, 1.8));
+        o.frequency.exponentialRampToValueAtTime(40 * pitch, t + 2.0);
+        const f = ctx.createBiquadFilter();
+        f.type = 'lowpass';
+        f.frequency.setValueAtTime(1200, t + 0.3);
+        f.frequency.exponentialRampToValueAtTime(180, t + 2.4);
+        f.connect(busGains[fx]);
+        noise(t + 0.3, t + 2.6, env(fx, t + 0.3, 0.3, 0.2, 2.0, f), 0.7);
+        caption('[fleet destroyed]');
+        break;
+      }
+      case 'handover': { // paper slide + wooden knock
+        const f = ctx.createBiquadFilter();
+        f.type = 'bandpass';
+        f.frequency.value = 2400 * cutoff;
+        f.Q.value = 0.8;
+        f.connect(busGains[fx]);
+        noise(t, t + 0.45, env(fx, t, 0.12, 0.08, 0.32, f), 1.6);
+        osc('triangle', 160 * pitch, t + 0.5, t + 0.65, env(fx, t + 0.5, 0.22, 0.004, 0.12));
+        caption('[pass the chart]');
+        break;
+      }
       default:
         break; // unknown names silently ignored
     }
@@ -455,11 +507,34 @@ export function createAudio() {
       noise(ts, ts + 2.8, sg, 0.8);
     }, 200);
     caption('[sea ambience]');
+
+    // Authored sea loop: crossfades in over the synth bed once decoded.
+    // If the clip is missing or fails to decode the synth bed simply stays.
+    ensureSampleLoaded(AMBIENCE_SAMPLE);
+    sampleLoads[AMBIENCE_SAMPLE].then(() => {
+      const buf = sampleBuffers[AMBIENCE_SAMPLE];
+      if (!ambRunning || ambSampleSrc || !ctx || !buf) return;
+      const ts = now();
+      const sampleGain = ctx.createGain();
+      sampleGain.gain.setValueAtTime(0.0001, ts);
+      sampleGain.gain.exponentialRampToValueAtTime(0.35, ts + 2.5);
+      sampleGain.connect(busGains.ambience);
+      const loop = ctx.createBufferSource();
+      loop.buffer = buf;
+      loop.loop = true;
+      loop.connect(sampleGain);
+      loop.start();
+      g.gain.setValueAtTime(g.gain.value, ts);
+      g.gain.linearRampToValueAtTime(0.0001, ts + 2.5); // fade the synth bed out
+      ambSampleSrc = loop;
+      ambNodes.push(loop, sampleGain);
+    });
   }
 
   function stopAmbience() {
     if (!ambRunning) return;
     ambRunning = false;
+    ambSampleSrc = null;
     if (ambTimer) { clearInterval(ambTimer); ambTimer = null; }
     teardown(ambNodes);
     ambNodes = [];

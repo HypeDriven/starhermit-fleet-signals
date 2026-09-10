@@ -20,3 +20,9 @@ Generated with MOSS-SoundEffect v2.0, 48 kHz mono Opus (96 kbps VBR, loudness-no
 | defeat-motif.opus | defeat | Somber defeat motif: low muted horn notes descending slowly, hollow and heavy, fading into a quiet low drone. |
 | lesson-complete.opus | lesson-done | Cheerful task-complete jingle: two bright ascending mallet notes, light and encouraging, clean short decay. |
 | achievement-sparkle.opus | achievement | Achievement sparkle: a rapid ascending glissando of tiny crystalline bell tones with a shimmering glockenspiel shimmer, light and magical. |
+| sea-ambience.opus | ambience | Calm open ocean at night heard from the deck of a steel ship: gentle rolling swell, soft water lapping against a hull, a low distant wind, no birds, no voices, steady and seamless for looping. |
+| battle-stations.opus | battle-start | Naval battle-stations alert: a short brass klaxon horn blast followed by one deep ship's bell strike, urgent and commanding, brief metallic tail, no reverb wash. |
+| target-lock.opus | select | Targeting lock tick: a short crisp sonar blip layered with a bright metallic switch click, electronic and precise, very short decay. |
+| sonar-hint.opus | hint | Submarine sonar ping: one clean pure high tone with a soft echoing tail that fades into quiet, underwater and spacious. |
+| fleet-eliminated.opus | eliminated | An entire fleet lost: a slow heavy explosion rolling into a long groaning metal collapse and deep rushing water, ominous and final. |
+| chart-handover.opus | handover | A large paper sea chart being folded and slid across a wooden table, then one soft wooden knock as it is set down. |
