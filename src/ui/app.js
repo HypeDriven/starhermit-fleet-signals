@@ -818,6 +818,7 @@ export class App {
       const hud = ev.target.closest('[data-hud]')?.dataset.hud;
       if (hud === 'pause') this.showPause();
       if (hud === 'left') node.querySelector('#rail-left').classList.toggle('open');
+      setTimeout(() => this.scene?.refit?.(), 260); // after the drawer transition
       if (hud === 'right') node.querySelector('#rail-right').classList.toggle('open');
     });
     this.mount(node);
@@ -1538,11 +1539,15 @@ export class App {
         <button data-tact="note" aria-pressed="${this.annotateMode}" ${!myTurn ? 'disabled' : ''}>✎ Note (N)</button>
         ${this.session.assists.hints ? `<button data-tact="hint" ${!myTurn ? 'disabled' : ''}>Hint (H)</button>` : ''}
         ${this.session.canUndo() ? '<button data-tact="undo">Undo (U)</button>' : ''}
-        ${this.scene.jobsPending ? '<button data-tact="skip">Skip ▸▸</button>' : ''}`;
+        ${this.scene.jobsPending ? '<button data-tact="skip">Skip ▸▸</button>' : ''}
+        <button data-tact="view" aria-label="Reset view (C)" title="Reset view (C)">⌖ View</button>
+        <button data-tact="topdown" aria-pressed="${!!this.scene.topDown}" title="Top-down chart">▦ Top</button>`;
     } else {
       html = '<span style="color:var(--text-dim);padding:8px">Resolving…</span>';
     }
+    if (tray.dataset.phase !== st.phase) { tray.scrollTop = 0; tray.scrollLeft = 0; tray.dataset.phase = st.phase; }
     tray.innerHTML = html;
+    requestAnimationFrame(() => this.scene?.refit?.());
     if (!tray.dataset.wired) {
       tray.dataset.wired = '1';
       tray.addEventListener('click', (ev) => this._trayClick(ev));
@@ -1581,6 +1586,8 @@ export class App {
     if (act === 'hint') this._showHint();
     if (act === 'undo') this._undo();
     if (act === 'skip') { this.scene.skip(); }
+    if (act === 'view') { this.scene.resetCamera(); this.play('ui-press'); }
+    if (act === 'topdown') { this.scene.toggleTopDown(); this.play('ui-press'); this._renderTray(); }
   }
 
   _autoPlace() {

@@ -925,41 +925,130 @@ export class FleetScene {
 
   setView(name, instant = false) {
     const pose = CAMERA_POSES[name] || CAMERA_POSES.battle;
-    this.camTarget.pos.fromArray(pose.pos);
-    this.camTarget.look.fromArray(pose.look);
+    this.viewName = name;
+    const basePos = new THREE.Vector3().fromArray(pose.pos);
+    const look = new THREE.Vector3().fromArray(pose.look);
+    // Fit the main board inside the HUD-free rectangle for this viewport.
+    const dir = basePos.clone().sub(look).normalize();
+    const dist = this._fitDistance(basePos, look);
+    this.camTarget.pos.copy(look).addScaledVector(dir, dist);
+    this.camTarget.look.copy(look);
     if (instant || this.reducedMotion) {
       this.camera.position.copy(this.camTarget.pos);
       this.camLook.copy(this.camTarget.look);
+      this.camBase = { pos: this.camTarget.pos.clone(), look: this.camTarget.look.clone() };
       this.camVel.pos.set(0, 0, 0);
       this.camVel.look.set(0, 0, 0);
     }
   }
 
+  /** Re-fit the current view (HUD or viewport changed). */
+  refit() { if (this.viewName) this.setView(this.viewName, false); }
+
   resetCamera() {
     this.orbitOffset.x = 0;
     this.orbitOffset.y = 0;
+    this.topDown = false;
+    this.refit();
+  }
+
+  toggleTopDown() {
+    this.topDown = !this.topDown;
+    this.orbitOffset.x = 0;
+    this.orbitOffset.y = 0;
+    return this.topDown;
+  }
+
+  // The HUD-free rectangle of the canvas (fractions). Panels hugging an edge
+  // carve that edge; the board is fitted inside what remains.
+  _safeInsets() {
+    const ins = { l: 0, r: 0, t: 0, b: 0 };
+    const doc = globalThis.document;
+    if (!doc) return ins;
+    const cr = this.canvas.getBoundingClientRect();
+    const W = cr.width || 1, H = cr.height || 1;
+    for (const sel of ['.hud-top', '#tray', '#rail-left', '#rail-right']) {
+      const el = doc.querySelector(sel);
+      if (!el || el.hidden || !el.offsetParent) continue;
+      const b = el.getBoundingClientRect();
+      if (!b.width || !b.height) continue;
+      const e = { l: (b.left - cr.left) / W, t: (b.top - cr.top) / H, r: (b.right - cr.left) / W, b: (b.bottom - cr.top) / H };
+      if (e.l >= 1 || e.r <= 0) continue; // parked drawers
+      if (e.b <= 0.45 && e.r - e.l > 0.5) ins.t = Math.max(ins.t, e.b);
+      else if (e.t >= 0.55) ins.b = Math.max(ins.b, 1 - e.t);
+      else if (e.r <= 0.42) ins.l = Math.max(ins.l, e.r);
+      else if (e.l >= 0.58) ins.r = Math.max(ins.r, 1 - e.l);
+    }
+    if (ins.l + ins.r > 0.6) { ins.l = 0; ins.r = 0; }
+    if (ins.t + ins.b > 0.7) { ins.t = Math.min(ins.t, 0.3); ins.b = Math.min(ins.b, 0.3); }
+    return ins;
+  }
+
+  // Distance along the pose's line of sight at which the main board fits the
+  // safe rectangle (checked by projecting the board corners).
+  _fitDistance(basePos, look) {
+    const b = this.boards?.main;
+    if (!b) return basePos.distanceTo(look);
+    const ins = this._safeInsets();
+    const dir = basePos.clone().sub(look).normalize();
+    const c = BOARD_LAYOUT.main.center;
+    const half = b.half + 0.6;
+    const corners = [];
+    for (const dx of [-half, half]) for (const dz of [-half, half]) corners.push(new THREE.Vector3(c.x + dx, c.y, c.z + dz));
+    // NDC bounds of the safe rect
+    const xMin = -1 + 2 * ins.l + 0.06, xMax = 1 - 2 * ins.r - 0.06;
+    const yMin = -1 + 2 * ins.b + 0.06, yMax = 1 - 2 * ins.t - 0.06;
+    const cam = this._fitCam || (this._fitCam = new THREE.PerspectiveCamera());
+    cam.fov = this.camera.fov; cam.aspect = this.camera.aspect; cam.near = this.camera.near; cam.far = this.camera.far;
+    cam.updateProjectionMatrix();
+    let dist = basePos.distanceTo(look);
+    const v = new THREE.Vector3();
+    for (let i = 0; i < 12; i++) {
+      cam.position.copy(look).addScaledVector(dir, dist);
+      cam.lookAt(look);
+      cam.updateMatrixWorld();
+      let over = 0;
+      for (const p of corners) {
+        v.copy(p).project(cam);
+        over = Math.max(over, xMin - v.x, v.x - xMax, yMin - v.y, v.y - yMax);
+      }
+      if (over <= 0) break;
+      dist *= 1 + Math.min(0.5, over * 0.6 + 0.02);
+    }
+    return dist;
   }
 
   _updateCamera(dt) {
-    // critically damped springs (interruptible, not cumulative lerp)
+    // critically damped springs on the BASE pose (interruptible, not cumulative
+    // lerp); orbit and shake are applied on top each frame and never fed back.
+    if (!this.camBase) {
+      this.camBase = { pos: this.camera.position.clone(), look: this.camLook.clone() };
+    }
     const k = 42, c = 2 * Math.sqrt(k);
     for (const [cur, vel, tgt] of [
-      [this.camera.position, this.camVel.pos, this.camTarget.pos],
-      [this.camLook, this.camVel.look, this.camTarget.look],
+      [this.camBase.pos, this.camVel.pos, this.camTarget.pos],
+      [this.camBase.look, this.camVel.look, this.camTarget.look],
     ]) {
       vel.x += (k * (tgt.x - cur.x) - c * vel.x) * dt;
       vel.y += (k * (tgt.y - cur.y) - c * vel.y) * dt;
       vel.z += (k * (tgt.z - cur.z) - c * vel.z) * dt;
       cur.x += vel.x * dt; cur.y += vel.y * dt; cur.z += vel.z * dt;
     }
-    const look = this.camLook.clone();
-    // orbit gesture: rotate camera around the look point
+    const look = this.camBase.look.clone();
+    this.camLook.copy(look);
+    this.camera.position.copy(this.camBase.pos);
+    // orbit gesture: rotate the base pose around the look point (pitch is
+    // clamped so the board never flattens into an unreadable horizon)
     if (this.orbitOffset.x || this.orbitOffset.y) {
       const off = this.camera.position.clone().sub(look);
       const sph = new THREE.Spherical().setFromVector3(off);
       sph.theta += this.orbitOffset.x;
-      sph.phi = THREE.MathUtils.clamp(sph.phi + this.orbitOffset.y, 0.25, 1.35);
+      sph.phi = THREE.MathUtils.clamp(sph.phi + this.orbitOffset.y, 0.2, 1.05);
       this.camera.position.copy(look).add(new THREE.Vector3().setFromSpherical(sph));
+    }
+    if (this.topDown) {
+      const d = this.camera.position.distanceTo(look);
+      this.camera.position.set(look.x, look.y + d, look.z + 0.01);
     }
     // event-tiered shake (never affects raycast truth: applied to view only)
     if (this.shake > 0 && !this.reducedMotion) {
@@ -1088,6 +1177,7 @@ export class FleetScene {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.refit();
   }
 
   dispose() {
