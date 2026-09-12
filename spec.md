@@ -20,7 +20,7 @@
 | Path | Responsibility |
 |---|---|
 | `index.html` | Entry: `<canvas id="scene">`, `#label-layer` (projected A–J / 1–10 labels), `#ui`, live regions, caption line, import map, `<noscript>` |
-| `src/main.js` | Boot: WebGL check, save load/migrate, platform adapter (`/api/v1/time` sync, telemetry beacon, presence), audio unlock, visibility pause, `?demo` capture mode, `window.__fleet` test handle |
+| `src/main.js` | Boot: WebGL check, save load/migrate, platform adapter (launch-token auth + 45-min refresh, `/api/v1/time` sync, account nickname, cloud-save mirror + sync status; telemetry/presence local-dev-only), audio unlock, visibility pause, `?demo` capture mode, `window.__fleet` test handle |
 | `src/rules/engine.js` | Pure rules: fleets, grids, mechanics, `createMatch`, `validatePlacement`, `autoPlaceFleet`, `listLegalActions`, `applyCommand`, scoring, tie-breaks, stars, hashing, serialization/migration, replay envelope |
 | `src/rules/ai.js` | Deterministic AI (`chooseCommand`) at easy/medium/hard and the human `suggestTarget` hint |
 | `src/rules/rng.js` | FNV-1a `hashString`, Mulberry32 `makeRng` with `fork`, `resumeRng` |
@@ -28,6 +28,7 @@
 | `src/content/stages.js` | 5 themes, 40 Journey stages, 8 Challenges, `dailyStage(date)`, `validateStage` |
 | `src/content/tutorial.js` | 5 Learn lessons (engine configs + wait-for steps) |
 | `src/platform/save.js` | Checksummed localStorage document, v1→v2 migration, `mergeSaves`, local leaderboard, 5 achievements |
+| `src/platform/starhermit.js` | Hosted-platform adapter: fragment launch-token read/strip + JWT decode, Bearer REST helper, 45-min token refresh, profile nickname lookup, stored-zip helpers, cloud-save mirror (debounced PUT + flush) |
 | `src/render/scene.js` | `FleetScene`: quality tiers, camera poses, procedural hulls, water shader, particle pool, boards, pointer raycast, cosmetic jobs |
 | `src/audio/audio.js` | WebAudio buses, 22 sampled events with synth fallbacks, procedural music/ambience, caption sink |
 | `src/ui/app.js` | `App`: screens, HUD, tray, placement editor, battle input, keyboard/gamepad, results, pause, hotseat handover, resume |
@@ -201,14 +202,15 @@ Conventions follow https://wiki.starhermit.com/ (manifest, same-origin `/api`, a
 |---|---|
 | Manifest / launch | `starhermit.txt` with `name`, `launch=index.html`, `owner`, `server=server.js`, `cover=coverart.png` |
 | Server time | `GET /api/v1/time` at boot, round-trip adjusted offset; `utcToday()` drives Daily Signal; local clock when offline |
-| Telemetry | consent-free anonymous funnel only: `round-start`, `round-end`, `tutorial-step`, `settings-change`, `error`, `first-action`, `input-modality`, `retry` via `sendBeacon('/api/v1/telemetry')` |
-| Presence | `POST /api/v1/presence` every 30 s while a battle is in the foreground |
+| Telemetry | local dev server only (consent-free anonymous funnel: `round-start`, `round-end`, `tutorial-step`, `settings-change`, `error`, `first-action`, `input-modality`, `retry` via `sendBeacon`); no per-game telemetry route exists on-platform, so hosted mode sends nothing |
+| Presence | local dev server only (`POST /api/v1/presence` every 30 s while a battle is in the foreground); deleted in hosted mode |
 | Game script | `server.js` exports the authoritative session API: membership check, 4096-byte UTF-8 payload cap, 20 msgs / 10 s rate limit, idempotent command ids (512 cap), per-turn 24 h deadlines with `checkDeadline` auto-resign (battle and placement), redacted `getSnapshot`, `sessionSummary`, result contract `{winner, reason, scores, finishedAt}` |
-| Identity / profile | local guest profile only (`profile.name`, 18 chars); no sign-in, no avatar use |
+| Launch / auth | hosted mode activates iff `#game_token=<jwt>` is read from the URL fragment (read once, stripped; `?token=`/`?launch=` query fallbacks for local dev); `sub`/`game_scope` decoded; `Authorization: Bearer` on every REST call; token re-minted via `POST /api/v1/games/{slug}/launch-token` every 45 min (60 s retry) |
+| Identity / profile | hosted: account nickname from `GET /api/v1/users/{sub}/profile` (never `/api/v1/me`, never usernames; `Player `+id8 fallback) shown on the profile screen and adopted as the default local display name; offline: local guest profile only (`profile.name`, 18 chars) |
 | Leaderboards | local board in the save doc (score-desc, cap 100, with ruleset, content version, seed, assists, duration); no remote submission |
 | Achievements | 5 static keys unlocked idempotently in the local save: `first-victory`, `sharpshooter`, `daily-streak-3`, `journey-mastery`, `long-voyage` |
 | Sessions / invites / chat / voice | not used; Hosted Table is local pass-and-play; a network transport is not wired |
-| Cloud save | `mergeSaves` conflict helper exists; no upload/download |
+| Cloud save | hosted: GET/PUT `/api/v1/me/cloud-saves/fleet-signals` — single slot, zip+base64 (stored-zip helper in `src/platform/starhermit.js`), remote-preferred load via `mergeSaves`, ~2 s debounce + `pagehide`/`visibilitychange` flush, sync status on the profile screen; localStorage stays the offline cache |
 
 ## 13. Technical architecture
 
@@ -221,7 +223,7 @@ Conventions follow https://wiki.starhermit.com/ (manifest, same-origin `/api`, a
 
 ## 14. Testing and acceptance criteria
 
-**`npm test` (`tests/run.js`, 44 tests).** RNG determinism and forks; placement acceptance, overlap, bounds, noTouch, mine, double placement, auto-place legality on every stage config; fire hit/sunk/elimination/victory, not-your-turn, duplicate cell, bounds, self/dead target, mine cost, move-limit winner, salvo shots, fog identity, resign; annotate tick invariance; legal actions per phase and 3-player skirmish; placement-phase resignation deadlocks; score breakdown sums, tie-break order, stars; replay property (20 games), envelope tamper detection, serialization round-trip, v1/v2 migration, duplicate id idempotence; 4000-command fuzz; all 40 stages + 8 challenges validate, validator rejects illegal stage, daily determinism; AI termination at all difficulties and hard beats easy over 6 seeds; session results/undo/restore/hint; server lifecycle, redaction, duplicates, deadline; golden hashes for easy/medium/hard scripted sessions.
+**`npm test` (`tests/run.js`, 50 tests).** RNG determinism and forks; platform adapter (stored-zip round-trip, base64 bytes, JWT decode, fragment read/strip + query fallback, nickname preference/fallback, cloud-save debounce/flush/upload payload); placement acceptance, overlap, bounds, noTouch, mine, double placement, auto-place legality on every stage config; fire hit/sunk/elimination/victory, not-your-turn, duplicate cell, bounds, self/dead target, mine cost, move-limit winner, salvo shots, fog identity, resign; annotate tick invariance; legal actions per phase and 3-player skirmish; placement-phase resignation deadlocks; score breakdown sums, tie-break order, stars; replay property (20 games), envelope tamper detection, serialization round-trip, v1/v2 migration, duplicate id idempotence; 4000-command fuzz; all 40 stages + 8 challenges validate, validator rejects illegal stage, daily determinism; AI termination at all difficulties and hard beats easy over 6 seeds; session results/undo/restore/hint; server lifecycle, redaction, duplicates, deadline; golden hashes for easy/medium/hard scripted sessions.
 
 **`tests/e2e.mjs` (Playwright + system Chrome, `PORT` optional).** Desktop 1280×800 and mobile 390×844 touch passes: title → settings (reduced motion, deuteranopia palette applied) → practice setup (easy) → Auto-deploy + Confirm → first shot via H + Fire → Undo restores shotsUsed 0 → Note mode via keyboard → pause/resume, pause → help → done → resume, Esc toggling → battle played to a terminal result via hint + Fire → results rows ≥ 3 and save doc persisted → title. Hosted pass: add/drop/add seats keeps unique ids and starts a 3-seat match. Any `pageerror` or console error fails the run.
 

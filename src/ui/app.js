@@ -77,6 +77,10 @@ export class App {
     this._wireKeyboard();
     this._wireGamepad();
     this.applySettings();
+    // Re-render the open profile screen when account/sync status changes.
+    if (this.platform.onChange === null) {
+      this.platform.onChange = () => { if (this._profileOpen) this.showProfile(); };
+    }
     if (this.audio.setCaptionSink) {
       this.audio.setCaptionSink((text) => { this.captionLine.textContent = text; });
     }
@@ -134,6 +138,7 @@ export class App {
   /** Replace the UI layer contents; manages focus restoration. */
   mount(node, { focusSelector = 'button, [tabindex], input, select' } = {}) {
     this.cleanup();
+    this._profileOpen = false;
     this.ui.innerHTML = '';
     this.ui.appendChild(node);
     const f = node.querySelector(focusSelector);
@@ -470,10 +475,18 @@ export class App {
     }).join('');
     const boardRows = this.doc.boards.entries.slice(0, 10).map((b) =>
       `<tr><td>${esc(b.board)}</td><td>${b.score}</td><td>${esc(b.seed)}</td><td>${esc(String(b.date).slice(0, 10))}</td></tr>`).join('');
+    // Hosted identity + cloud-save mirror status (local play: device-only note).
+    const syncLabels = { loading: 'loading…', saving: 'saving…', synced: 'synced', error: 'sync error — retries with your next save', offline: 'offline' };
+    const accountRow = this.platform.hosted
+      ? `<p class="account-row">Signed in as <strong>${esc(this.platform.accountName || '…')}</strong>
+          <span class="badge">${esc(syncLabels[this.platform.syncStatus] || this.platform.syncStatus)}</span><br>
+          <small>Progress mirrors to your StarHermit cloud save; this device keeps an offline copy.</small></p>`
+      : `<p class="account-row"><span class="badge">Offline</span> <small>Progress is stored on this device only.</small></p>`;
     const node = el(`
       <div class="screen dim" role="main" aria-label="Profile">
         <div class="panel wide">
           <h2>Profile ${this.doc.profile.guest ? '<span class="badge">Guest</span>' : ''}</h2>
+          ${accountRow}
           <label for="profile-name">Display name</label>
           <input type="text" id="profile-name" value="${esc(this.doc.profile.name)}" maxlength="18">
           <div class="stat-grid" role="list" aria-label="Career statistics">
@@ -514,6 +527,7 @@ export class App {
       if (act === 'back') { this.play('ui-back'); this.showTitle(); }
     });
     this.mount(node);
+    this._profileOpen = true;
   }
 
   /* ================= settings ================= */

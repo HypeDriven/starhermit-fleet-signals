@@ -1,11 +1,15 @@
 /**
  * Bootstrap: capability detection, asset/lifecycle wiring, platform adapter
- * (server time, telemetry consent-gated funnel events, presence heartbeat),
- * save loading, and the top-level app controller.
+ * (server time, launch-token auth + refresh, account nickname, cloud-save
+ * mirror with sync status; telemetry/presence are local-dev-only), save
+ * loading, and the top-level app controller.
  */
 import { FleetScene } from './render/scene.js';
 import { createAudio } from './audio/audio.js';
-import { loadSave, storeSave, defaultSave } from './platform/save.js';
+import { loadSave, storeSave, defaultSave, checksumDoc, mergeSaves, SAVE_VERSION } from './platform/save.js';
+import {
+  readLaunchToken, createApi, resolveNickname, scheduleTokenRefresh, createCloudSave,
+} from './platform/starhermit.js';
 import { App } from './ui/app.js';
 
 function webglAvailable() {
@@ -19,15 +23,20 @@ function webglAvailable() {
 
 /* ---------------- platform adapter (offline-tolerant) ---------------- */
 
-function createPlatform() {
+function createPlatform(auth, api) {
   let offsetMs = 0;
   let serverSynced = false;
+  // Hosted mode activates iff a launch token was read from the URL.
+  const hosted = !!(auth && auth.token && auth.slug);
 
   // Synchronize daily boundaries with host time when hosted; round-trip adjusted.
   (async () => {
     try {
       const t0 = Date.now();
-      const res = await fetch('/api/v1/time', { cache: 'no-store' });
+      const res = await fetch('/api/v1/time', {
+        cache: 'no-store',
+        headers: hosted ? { Authorization: `Bearer ${auth.token}` } : {},
+      });
       if (!res.ok) return;
       const t1 = Date.now();
       const body = await res.json();
@@ -39,12 +48,28 @@ function createPlatform() {
     } catch { /* offline/local play: local UTC clock is authoritative */ }
   })();
 
+  if (hosted) {
+    // Refresh the 60-minute token on a 45-minute schedule (60 s retry).
+    scheduleTokenRefresh(auth, api);
+  }
+
   return {
+    hosted,
+    /** Account nickname (profile lookup); null until resolved or offline. */
+    accountName: null,
+    /** Cloud-save mirror state: loading|saving|synced|offline|error. */
+    syncStatus: hosted ? 'loading' : 'offline',
+    /** App hook: re-render the profile screen when identity/sync changes. */
+    onChange: null,
     get serverSynced() { return serverSynced; },
     now() { return Date.now() + offsetMs; },
     utcToday() { return new Date(this.now()).toISOString().slice(0, 10); },
-    /** Anonymous funnel events only; never message content or pointer trails. */
+    /**
+     * Anonymous funnel events only; never message content or pointer trails.
+     * The platform has no per-game telemetry route — local dev server only.
+     */
     track(name, props) {
+      if (hosted) return;
       const allowed = ['round-start', 'round-end', 'tutorial-step', 'settings-change', 'error', 'first-action', 'input-modality', 'retry'];
       if (!allowed.includes(name)) return;
       const payload = { event: name, at: new Date().toISOString(), ...(props || {}) };
@@ -53,7 +78,8 @@ function createPlatform() {
       }
     },
     presence(active) {
-      if (!active) return;
+      // Local dev server shim only; no presence endpoint exists on-platform.
+      if (hosted || !active) return;
       fetch('/api/v1/presence', { method: 'POST', body: '{}' }).catch(() => {});
     },
   };
@@ -61,7 +87,7 @@ function createPlatform() {
 
 /* ---------------- boot ---------------- */
 
-function boot() {
+async function boot() {
   const canvas = document.getElementById('scene');
   const ui = document.getElementById('ui');
 
@@ -77,16 +103,64 @@ function boot() {
     return;
   }
 
-  const { doc, migrated, corrupted } = loadSave();
+  // Launch token: fragment #game_token read once and stripped. Absent → the
+  // game is identical to local/offline play; localStorage is the save.
+  const auth = readLaunchToken();
+  const api = createApi(auth || { token: null });
+
+  let { doc, migrated, corrupted } = loadSave();
+  const platform = createPlatform(auth, api);
+
+  // Cloud save: remote slot is a mirror; on conflict the remote doc wins.
+  // localStorage stays the offline cache regardless of outcome.
+  let cloud = null;
+  if (platform.hosted) {
+    cloud = createCloudSave({
+      api, auth, slug: auth.slug,
+      onStatus: (s) => { platform.syncStatus = s; platform.onChange?.(); },
+    });
+    try {
+      const remote = await cloud.load();
+      const valid = remote && remote.version === SAVE_VERSION && remote.checksum === checksumDoc(remote);
+      if (valid) {
+        const m = mergeSaves(doc, remote);
+        const winner = m.conflict ? remote : m.resolved;
+        if (checksumDoc(winner) !== checksumDoc(doc)) {
+          Object.keys(doc).forEach((k) => delete doc[k]);
+          Object.assign(doc, winner);
+          storeSave(doc);
+          cloud.push(doc); // bring the mirror up to the merged doc
+        } else {
+          platform.syncStatus = 'synced';
+        }
+      } else {
+        platform.syncStatus = 'synced'; // no slot yet, identical, or unreadable
+      }
+    } catch { /* network down: local cache is authoritative */ }
+  }
+
   const saveHooks = {
-    persist(d) { storeSave(d); },
+    persist(d) { storeSave(d); cloud?.push(d); },
     reset() {
       const fresh = defaultSave();
       Object.keys(doc).forEach((k) => delete doc[k]);
       Object.assign(doc, fresh);
       storeSave(doc);
+      cloud?.push(doc);
     },
   };
+
+  if (platform.hosted) {
+    resolveNickname(api, auth.sub).then((name) => {
+      platform.accountName = name;
+      // Fresh guest docs take the account nickname as their local display name.
+      if (name && doc.profile.guest && doc.profile.name === 'Guest Captain') {
+        doc.profile.name = name.slice(0, 18);
+        saveHooks.persist(doc);
+      }
+      platform.onChange?.();
+    });
+  }
 
   const audio = createAudio();
   const scene = new FleetScene(canvas, {
@@ -95,7 +169,6 @@ function boot() {
     reducedMotion: doc.settings.reducedMotion || matchMedia('(prefers-reduced-motion: reduce)').matches,
     visualSeed: 'fleet-signals-v1',
   });
-  const platform = createPlatform();
   const app = new App({ scene, audio, saveDoc: doc, platform, saveHooks });
 
   if (matchMedia('(prefers-reduced-motion: reduce)').matches && !doc.settings.reducedMotion) {
@@ -118,6 +191,7 @@ function boot() {
     if (document.hidden) {
       scene.pause();
       audio.suspend();
+      cloud?.flush();
       if (app.session && !app.hotseat && app.phase !== 'results') app.paused = true;
     } else {
       scene.start();
@@ -130,7 +204,9 @@ function boot() {
     }
   });
 
-  // throttled presence heartbeat while actively playing
+  window.addEventListener('pagehide', () => cloud?.flush());
+
+  // throttled presence heartbeat while actively playing (local dev only)
   setInterval(() => {
     if (app.session && !document.hidden && app.phase === 'battle') platform.presence(true);
   }, 30000);

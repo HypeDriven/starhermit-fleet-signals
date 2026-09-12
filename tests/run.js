@@ -15,6 +15,10 @@ import {
 import {
   createSession, handleMessage, getSnapshot, checkDeadline, sessionSummary,
 } from '../server.js';
+import {
+  zipStore, unzipFirstEntry, bytesToBase64, base64ToBytes,
+  decodeJwt, readLaunchToken, resolveNickname, createCloudSave,
+} from '../src/platform/starhermit.js';
 
 let passed = 0;
 let failed = 0;
@@ -659,6 +663,81 @@ test('golden: scripted easy/medium/hard sessions match pinned hashes', () => {
       eq(hash, GOLDENS[seed], `golden mismatch for ${seed}`);
     }
   }
+});
+
+/* ==================== platform adapter (starhermit.js) ==================== */
+
+test('platform: zip round-trip preserves save bytes', () => {
+  const json = JSON.stringify({ version: 2, boards: { entries: [{ score: 42 }] }, name: 'héllo' });
+  const bytes = new TextEncoder().encode(json);
+  const back = unzipFirstEntry(zipStore('save.json', bytes));
+  eq(new TextDecoder().decode(back), json);
+});
+
+test('platform: base64 byte round-trip on binary data', () => {
+  const bytes = new Uint8Array([0, 1, 2, 250, 251, 252, 253, 254, 255, 65]);
+  eq(Array.from(base64ToBytes(bytesToBase64(bytes))).join(','), Array.from(bytes).join(','));
+});
+
+test('platform: decodeJwt reads sub and game_scope, junk rejected', () => {
+  const mk = (payload) => 'h.' + bytesToBase64(new TextEncoder().encode(JSON.stringify(payload))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') + '.s';
+  const claims = decodeJwt(mk({ sub: 'u-123', game_scope: 'fleet-signals', exp: 1 }));
+  eq(claims.sub, 'u-123');
+  eq(claims.game_scope, 'fleet-signals');
+  eq(decodeJwt('not-a-jwt'), null);
+});
+
+test('platform: fragment token read once, stripped, query fallback for dev', () => {
+  const calls = [];
+  const realHistory = globalThis.history;
+  globalThis.history = { replaceState: (...a) => calls.push(a) };
+  try {
+    const token = 'h.' + bytesToBase64(new TextEncoder().encode(JSON.stringify({ sub: 'abc', game_scope: 'fleet-signals' }))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') + '.s';
+    const frag = readLaunchToken({ hash: `#game_token=${token}&session_id=g`, search: '', pathname: '/index.html' });
+    eq(frag.sub, 'abc');
+    eq(frag.slug, 'fleet-signals');
+    eq(calls.length, 1, 'fragment stripped via replaceState');
+    eq(calls[0][2], '/index.html');
+    const query = readLaunchToken({ hash: '', search: `?launch=${token}`, pathname: '/index.html' });
+    eq(query.sub, 'abc');
+    eq(calls.length, 1, 'query fallback does not strip the URL');
+    eq(readLaunchToken({ hash: '', search: '', pathname: '/' }), null);
+  } finally {
+    globalThis.history = realHistory;
+  }
+});
+
+test('platform: nickname prefers profile value, falls back to Player+id8', async () => {
+  const ok = await resolveNickname(async () => ({ nickname: 'Salty Admiral', username: 'salty_admirant' }), 'user-abcdef12');
+  eq(ok, 'Salty Admiral');
+  const noNickname = await resolveNickname(async () => ({ username: 'salty_admirant' }), 'user-abcdef12');
+  eq(noNickname, 'Player user-abc');
+  const fail = await resolveNickname(async () => { throw new Error('404'); }, 'user-abcdef12');
+  eq(fail, 'Player user-abc');
+});
+
+test('platform: cloud save debounces, uploads zipped base64, flushes pending', async () => {
+  const uploaded = [];
+  const statuses = [];
+  const api = async (method, path, body) => { uploaded.push({ method, path, body }); };
+  const cloud = createCloudSave({
+    api, auth: { token: 't', slug: 'fleet-signals' }, slug: 'fleet-signals',
+    onStatus: (s) => statuses.push(s),
+  });
+  const doc = { version: 2, checksum: '', stats: { sessions: 3 } };
+  cloud.push(doc);
+  eq(uploaded.length, 0, 'upload debounced');
+  await cloud.flush();
+  eq(uploaded.length, 1, 'flush forces the pending upload');
+  eq(uploaded[0].method, 'PUT');
+  eq(uploaded[0].path, '/api/v1/me/cloud-saves/fleet-signals');
+  const json = new TextDecoder().decode(unzipFirstEntry(base64ToBytes(uploaded[0].body.dataBase64)));
+  eq(json, JSON.stringify(doc), 'cloud payload is the zipped save doc');
+  assert(statuses.includes('saving') && statuses[statuses.length - 1] === 'synced', 'sync status surfaced');
+  // Two rapid pushes coalesce into one debounced upload.
+  cloud.push(doc); cloud.push(doc);
+  await cloud.flush();
+  eq(uploaded.length, 2, 'rapid pushes coalesce to a single upload');
 });
 
 /* ==================== summary ==================== */

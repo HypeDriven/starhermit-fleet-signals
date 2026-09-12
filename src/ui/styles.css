@@ -217,6 +217,11 @@ label { display: block; margin: 10px 0 4px; color: var(--text-dim); }
 .badge.ranked { border-color: var(--warn); color: var(--warn); }
 .badge.mastery { border-color: var(--hit); color: var(--hit); }
 
+.account-row { color: var(--text-dim); margin: 0 0 14px; }
+.account-row strong { color: var(--text); }
+.account-row .badge { margin: 0 6px; }
+.account-row small { color: var(--text-dim); }
+
 /* ---------------- HUD ---------------- */
 
 .hud-top {
