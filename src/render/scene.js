@@ -6,26 +6,132 @@
  * re-syncs board contents from the authoritative snapshot afterwards.
  */
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { detectPreset, resolve, describe, SHADOW_MAP, SEA_SEGMENTS, PARTICLE_CAP } from './gfx.js';
 import { makeRng } from '../rules/rng.js';
 import { cellToXY, cellName } from '../rules/engine.js';
 
 /* ------------------------------------------------------------------ */
-/* quality tiers                                                       */
+/* post-processing: colour grade + vignette (display space in and out)  */
 /* ------------------------------------------------------------------ */
 
-export const QUALITY_TIERS = {
-  low:    { dpr: 1.0, seaSegments: 48,  particles: 600,  shadows: false, antialias: false, renderScale: 0.85 },
-  medium: { dpr: 1.5, seaSegments: 96,  particles: 1600, shadows: false, antialias: true,  renderScale: 1.0 },
-  high:   { dpr: 2.0, seaSegments: 160, particles: 3200, shadows: true,  antialias: true,  renderScale: 1.0 },
+const GradeShader = {
+  uniforms: { tDiffuse: { value: null }, uAmount: { value: 1.0 }, uVignette: { value: 0.26 } },
+  vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tDiffuse; uniform float uAmount; uniform float uVignette;
+    varying vec2 vUv;
+    void main() {
+      vec4 src = texture2D(tDiffuse, vUv);
+      vec3 c = clamp(src.rgb, 0.0, 1.0);
+      // Gentle S-curve, a touch more saturation, cool shadows / warm highlights.
+      vec3 s = mix(c, c * c * (3.0 - 2.0 * c), 0.22);
+      float l = dot(s, vec3(0.299, 0.587, 0.114));
+      s = mix(vec3(l), s, 1.1);
+      s *= mix(vec3(0.95, 0.99, 1.06), vec3(1.04, 1.0, 0.95), smoothstep(0.25, 0.85, l));
+      s = s * 0.975 + 0.018; // keep the night sea's blacks legible
+      c = mix(c, s, uAmount);
+      float d = length(vUv - 0.5);
+      c *= 1.0 - uVignette * smoothstep(0.38, 0.9, d);
+      gl_FragColor = vec4(c, src.a);
+    }`,
 };
 
-export function pickAutoTier() {
-  const dpr = (globalThis.devicePixelRatio || 1);
-  const cores = globalThis.navigator?.hardwareConcurrency || 4;
-  const mobile = /Mobi|Android/i.test(globalThis.navigator?.userAgent || '');
-  if (mobile && (cores <= 4 || dpr > 2.5)) return 'low';
-  if (mobile || cores <= 4) return 'medium';
-  return 'high';
+/** Standard material with the scene-wide image-based-lighting strength. */
+function envify(mat, k = 1) {
+  mat.envMapIntensity = 0.32 * k;
+  return mat;
+}
+
+/** Engraved chart for the table top: range rings, bearing ticks, compass rose. */
+function makeChartTexture() {
+  const doc = globalThis.document;
+  if (!doc) return null;
+  const N = 1024;
+  const c = doc.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d');
+  if (!g) return null;
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, N, N);
+  const cx = N / 2, R = N / 2 - 4;
+  g.strokeStyle = 'rgba(255,255,255,0.55)';
+  g.lineWidth = 2;
+  for (let i = 1; i <= 5; i++) {
+    g.globalAlpha = i === 5 ? 0.9 : 0.35;
+    g.beginPath(); g.arc(cx, cx, R * (i / 5) - 6, 0, Math.PI * 2); g.stroke();
+  }
+  g.globalAlpha = 1;
+  for (let d = 0; d < 360; d += 2) {
+    const a = (d * Math.PI) / 180;
+    const len = d % 30 === 0 ? 34 : d % 10 === 0 ? 20 : 9;
+    g.globalAlpha = d % 30 === 0 ? 0.95 : 0.55;
+    g.beginPath();
+    g.moveTo(cx + Math.cos(a) * (R - 8), cx + Math.sin(a) * (R - 8));
+    g.lineTo(cx + Math.cos(a) * (R - 8 - len), cx + Math.sin(a) * (R - 8 - len));
+    g.stroke();
+  }
+  // compass rose spokes
+  g.globalAlpha = 0.22;
+  for (let k = 0; k < 16; k++) {
+    const a = (k * Math.PI) / 8;
+    g.beginPath(); g.moveTo(cx, cx);
+    g.lineTo(cx + Math.cos(a) * (R - 50), cx + Math.sin(a) * (R - 50));
+    g.stroke();
+  }
+  g.globalAlpha = 0.9;
+  g.fillStyle = '#fff';
+  g.font = 'bold 34px sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  [['N', -Math.PI / 2], ['E', 0], ['S', Math.PI / 2], ['W', Math.PI]].forEach(([t, a]) => {
+    g.fillText(t, cx + Math.cos(a) * (R - 66), cx + Math.sin(a) * (R - 66));
+  });
+  // faint survey speckle so the glass never reads as a flat fill
+  const rng = makeRng('fleet-signals:chart-speckle');
+  g.globalAlpha = 0.12;
+  for (let i = 0; i < 2600; i++) {
+    const a = rng.next() * Math.PI * 2, r = Math.sqrt(rng.next()) * (R - 10);
+    g.fillRect(cx + Math.cos(a) * r, cx + Math.sin(a) * r, 2, 2);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/** Brushed-metal streaks for the pedestal (roughness + bump). */
+function makeBrushedTexture() {
+  const doc = globalThis.document;
+  if (!doc) return null;
+  const c = doc.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const g = c.getContext('2d');
+  if (!g) return null;
+  g.fillStyle = '#8a8a8a';
+  g.fillRect(0, 0, 512, 128);
+  const rng = makeRng('fleet-signals:brushed');
+  for (let i = 0; i < 900; i++) {
+    const v = Math.floor(90 + rng.next() * 110);
+    g.fillStyle = `rgba(${v},${v},${v},0.35)`;
+    g.fillRect(rng.next() * 512, rng.next() * 128, 30 + rng.next() * 160, 1);
+  }
+  // panel seams
+  g.fillStyle = 'rgba(20,20,20,0.9)';
+  for (let x = 0; x < 512; x += 64) g.fillRect(x, 0, 2, 128);
+  g.fillRect(0, 40, 512, 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(3, 1);
+  return tex;
 }
 
 /* ------------------------------------------------------------------ */
@@ -54,7 +160,8 @@ const INVALID_COLOR = 0xff5468;
 /* procedural ship hull geometry (authored, inspectable)               */
 /* ------------------------------------------------------------------ */
 
-function buildHullGeometry(size) {
+function buildHullGeometry(size, detailed = false) {
+  if (detailed) return buildDetailedHull(size);
   // A low-poly stylized hull: tapered bow, flat stern, deck and bridge.
   const L = size * 0.86;        // length in cells
   const W = 0.52;               // beam
@@ -88,20 +195,99 @@ function buildHullGeometry(size) {
   return mergeGeometries(parts);
 }
 
-/** Minimal BufferGeometry merge (positions/normals/uvs, non-indexed). */
-function mergeGeometries(geos) {
+// Vertex colours for the detailed hull (multiplied by a white material).
+const HULL_TONES = {
+  hull: 0x8a97a8, deck: 0x5f6b79, house: 0xc5ced8, gun: 0x9ba7b6, dark: 0x343d48, glass: 0x7fd8ee,
+};
+
+/**
+ * Detailed hull: bevelled plan with the same footprint and height band as
+ * the plain hull, plus a deck, superstructure, turrets and mast so each
+ * size class reads as a distinct vessel. Carriers get a flight deck and an
+ * offset island.
+ */
+function buildDetailedHull(size) {
+  const L = size * 0.86;
+  const W = 0.52;
+  const H = 0.34;
+  const b = 0.035;
+  const shape = new THREE.Shape();
+  const l = L / 2 - b, w = W / 2 - b;
+  shape.moveTo(-l, -w * 0.86);
+  shape.quadraticCurveTo(-l, -w, -l + 0.06, -w);
+  shape.lineTo(l - W * 0.95, -w);
+  shape.quadraticCurveTo(l - W * 0.3, -w * 0.8, l, 0);
+  shape.quadraticCurveTo(l - W * 0.3, w * 0.8, l - W * 0.95, w);
+  shape.lineTo(-l + 0.06, w);
+  shape.quadraticCurveTo(-l, w, -l, w * 0.86);
+  shape.lineTo(-l, -w * 0.86);
+  const hull = new THREE.ExtrudeGeometry(shape, {
+    depth: H - 2 * b, bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 2, curveSegments: 6,
+  });
+  hull.rotateX(-Math.PI / 2);
+  hull.translate(0, H + b, 0);
+  const top = 2 * H;
+  const parts = [{ g: hull, c: HULL_TONES.hull }];
+  const box = (sx, sy, sz, x, y, z, c) => {
+    const g = new THREE.BoxGeometry(sx, sy, sz);
+    g.translate(x, y + sy / 2, z);
+    parts.push({ g, c });
+  };
+  const cyl = (r, h, x, y, z, c, seg = 10) => {
+    const g = new THREE.CylinderGeometry(r, r, h, seg);
+    g.translate(x, y + h / 2, z);
+    parts.push({ g, c });
+  };
+  const turret = (x, dir) => {
+    cyl(0.1, 0.06, x, top, 0, HULL_TONES.gun);
+    box(0.2, 0.03, 0.028, x + dir * 0.13, top + 0.025, 0.035, HULL_TONES.dark);
+    box(0.2, 0.03, 0.028, x + dir * 0.13, top + 0.025, -0.035, HULL_TONES.dark);
+  };
+  if (size >= 5) {
+    // carrier: full-length flight deck with an island on the starboard side
+    box(L * 0.9, 0.04, W * 0.92, -L * 0.02, top - 0.02, 0, HULL_TONES.deck);
+    box(L * 0.7, 0.005, 0.02, -L * 0.05, top + 0.02, 0, HULL_TONES.house);
+    box(0.34, 0.2, 0.13, -L * 0.12, top + 0.02, W * 0.3, HULL_TONES.house);
+    box(0.2, 0.05, 0.135, -L * 0.1, top + 0.14, W * 0.3, HULL_TONES.glass);
+    cyl(0.015, 0.26, -L * 0.14, top + 0.22, W * 0.3, HULL_TONES.dark, 6);
+  } else {
+    box(L * 0.8, 0.03, W * 0.62, -L * 0.04, top - 0.01, 0, HULL_TONES.deck);
+    if (size >= 3) {
+      box(W * 0.72, H * 0.62, W * 0.56, -L * 0.1, top, 0, HULL_TONES.house);
+      box(W * 0.5, H * 0.3, W * 0.5, -L * 0.1, top + H * 0.62, 0, HULL_TONES.house);
+      box(W * 0.52, 0.045, W * 0.52, -L * 0.1 + 0.02, top + H * 0.72, 0, HULL_TONES.glass);
+      cyl(0.02, H * 1.25, -L * 0.14, top + H * 0.92, 0, HULL_TONES.dark, 6);
+      box(0.03, 0.02, 0.22, -L * 0.14, top + H * 1.9, 0, HULL_TONES.dark);
+      cyl(0.06, 0.16, -L * 0.28, top, 0, HULL_TONES.dark, 8); // funnel
+      turret(L * 0.22, 1);
+      if (size >= 4) turret(-L * 0.4, -1);
+    } else {
+      box(W * 0.6, H * 0.45, W * 0.5, -L * 0.05, top, 0, HULL_TONES.house);
+      box(W * 0.42, 0.04, W * 0.52, -L * 0.05 + 0.03, top + H * 0.3, 0, HULL_TONES.glass);
+      cyl(0.015, H * 0.9, -L * 0.18, top, 0, HULL_TONES.dark, 6);
+    }
+  }
+  return mergeGeometries(parts.map((p) => p.g), parts.map((p) => p.c));
+}
+
+/** Minimal BufferGeometry merge (positions/normals/uvs/colours, non-indexed). */
+function mergeGeometries(geos, tones = null) {
   const nonIndexed = geos.map((g) => g.index ? g.toNonIndexed() : g);
-  const pos = [], norm = [], uv = [];
-  for (const g of nonIndexed) {
+  const pos = [], norm = [], uv = [], col = [];
+  const c = new THREE.Color();
+  nonIndexed.forEach((g, gi) => {
     pos.push(...g.attributes.position.array);
     norm.push(...g.attributes.normal.array);
     if (g.attributes.uv) uv.push(...g.attributes.uv.array);
     else uv.push(...new Array((g.attributes.position.count) * 2).fill(0));
-  }
+    c.set(tones ? tones[gi] : 0xffffff);
+    for (let i = 0; i < g.attributes.position.count; i++) col.push(c.r, c.g, c.b);
+  });
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.Float32BufferAttribute(norm, 3));
   out.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   return out;
 }
 
@@ -110,6 +296,7 @@ function mergeGeometries(geos) {
 /* ------------------------------------------------------------------ */
 
 const WATER_VERT = /* glsl */`
+#include <fog_pars_vertex>
 uniform float uTime;
 uniform vec4 uRipples[8]; // x, z, startTime, strength
 varying vec3 vNormalW;
@@ -143,31 +330,57 @@ void main() {
   pos.y += h;
   vNormalW = normalize(vec3(-hx / e, 1.0, -hz / e));
   vPosW = (modelMatrix * vec4(pos, 1.0)).xyz;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+  vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
 }
 `;
 
+// Detailed water adds a two-layer chop to the normal (glitter under the key
+// light), a broad moon sheen and the holo table's cyan glow on the swell.
 const WATER_FRAG = /* glsl */`
+#include <common>
+#include <fog_pars_fragment>
 uniform vec3 uDeep;
 uniform vec3 uShallow;
 uniform vec3 uSky;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
+uniform vec3 uGlow;
+uniform float uTime;
+uniform float uDetail;
 varying vec3 vNormalW;
 varying vec3 vPosW;
 
 void main() {
   vec3 n = normalize(vNormalW);
   vec3 viewDir = normalize(cameraPosition - vPosW);
+  float dist = length(cameraPosition - vPosW);
+  if (uDetail > 0.5) {
+    vec2 p = vPosW.xz;
+    float t = uTime;
+    float fade = exp(-dist * 0.035);
+    float nx = cos(p.x * 2.3 + t * 1.6 + sin(p.y * 0.9)) + 0.6 * cos((p.x - p.y) * 3.7 + t * 2.4);
+    float nz = cos(p.y * 2.9 - t * 1.3 + sin(p.x * 1.2)) - 0.6 * cos((p.x - p.y) * 3.7 + t * 2.4);
+    n = normalize(n + vec3(nx, 0.0, nz) * 0.09 * fade);
+  }
   float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 2.2);
   float depthMix = clamp(0.35 + vPosW.y * 0.8, 0.0, 1.0);
   vec3 base = mix(uDeep, uShallow, depthMix);
   vec3 col = mix(base, uSky, fresnel * 0.65);
-  // sun glints
+  // sun / moon glints
   vec3 halfV = normalize(uSunDir + viewDir);
-  float spec = pow(max(dot(n, halfV), 0.0), 220.0);
-  col += uSunColor * spec * 0.9;
+  float nh = max(dot(n, halfV), 0.0);
+  col += uSunColor * pow(nh, 220.0) * 0.9;
+  if (uDetail > 0.5) {
+    col += uSunColor * pow(nh, 28.0) * 0.05;
+    float r = length(vPosW.xz - vec2(0.0, -0.5));
+    col += uGlow * exp(-r * 0.22) * (0.10 + 0.08 * max(n.x + n.z, 0.0));
+  }
   gl_FragColor = vec4(col, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+  #include <fog_fragment>
 }
 `;
 
@@ -211,6 +424,8 @@ class ParticlePool {
           float a = smoothstep(0.5, 0.05, length(d));
           if (a < 0.01) discard;
           gl_FragColor = vec4(vColor, a);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
         }`,
     });
     this.points = new THREE.Points(geo, mat);
@@ -289,6 +504,8 @@ function buildGridBoard(gridSize, holoColor) {
       depthWrite: false,
     }),
   );
+  envify(plate.material, 0.5);
+  plate.receiveShadow = true;
   plate.position.y = -0.03;
   group.add(plate);
 
@@ -347,7 +564,7 @@ function buildGridBoard(gridSize, holoColor) {
   ring.visible = false;
   group.add(ring);
 
-  return { group, plate, pick, markers, ghost, ring, gridSize, cell, half };
+  return { group, plate, lines, pick, markers, ghost, ring, gridSize, cell, half };
 }
 
 /* ------------------------------------------------------------------ */
@@ -357,12 +574,12 @@ function buildGridBoard(gridSize, holoColor) {
 export class FleetScene {
   /**
    * @param {HTMLCanvasElement} canvas
-   * @param {object} opts { theme, qualityTier, reducedMotion, visualSeed }
+   * @param {object} opts { theme, graphics, reducedMotion, visualSeed }
+   *   graphics: saved Graphics settings (see gfx.js `resolve`); {} = Auto.
    */
   constructor(canvas, opts = {}) {
     this.canvas = canvas;
     this.opts = opts;
-    this.tierName = opts.qualityTier && opts.qualityTier !== 'auto' ? opts.qualityTier : pickAutoTier();
     this.reducedMotion = !!opts.reducedMotion;
     this.visualSeed = opts.visualSeed || 'fleet-signals';
     this.running = false;
@@ -373,6 +590,16 @@ export class FleetScene {
     this.shake = 0;
     this.orbitOffset = { x: 0, y: 0 };
     this.viewerId = null;
+    this.q = null;             // resolved graphics settings
+    this.size = [0, 0];
+    this.pixelRatio = 1;
+    this.adaptiveScale = 1;
+    this._frames = [];
+    this.fps = 0;
+    this.composer = null;
+    this.postKey = null;
+    this.postFailed = false;
+    this.wreckMats = [];
 
     // callbacks assigned by UI
     this.onCellHover = null; // (boardId, cell|null)
@@ -380,6 +607,7 @@ export class FleetScene {
     this.onCameraGesture = null;
 
     this._initRenderer();
+    this._detectGpu();
     this._initScene();
     this._initCamera();
     this._initEnvironment();
@@ -391,6 +619,8 @@ export class FleetScene {
     this.enemyShipMeshes = new Map(); // shipId -> mesh
     this.previewMeshes = [];
 
+    this.setGraphics(opts.graphics || {}, true);
+
     this._boundResize = () => this.resize();
     globalThis.addEventListener?.('resize', this._boundResize);
   }
@@ -398,19 +628,19 @@ export class FleetScene {
   /* ---------------- setup ---------------- */
 
   _initRenderer() {
-    const tier = QUALITY_TIERS[this.tierName];
+    // Canvas MSAA stays off: anti-aliasing comes from the post chain
+    // (FXAA / SMAA / multisampled target), so Low costs what it always did.
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: tier.antialias,
+      antialias: false,
       powerPreference: 'high-performance',
     });
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.18;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    if (tier.shadows) {
-      this.renderer.shadowMap.enabled = true;
-      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    }
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    if (this._contextHandlers) return;
+    this._contextHandlers = true;
     this.canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
       this.running = false;
@@ -419,9 +649,26 @@ export class FleetScene {
     this.canvas.addEventListener('webglcontextrestored', () => {
       this.contextLost = false;
       this._initRenderer();
-      this.resize();
+      this.composer = null;
+      this._envTex = null;
+      this.setGraphics(this.gfxSaved, true);
       this.running = true;
     });
+  }
+
+  _detectGpu() {
+    let gpu = '';
+    try {
+      const gl = this.renderer.getContext();
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    } catch { gpu = ''; }
+    this.gpu = String(gpu || '') || 'unknown GPU';
+    const nav = globalThis.navigator || {};
+    const mm = (q) => { try { return globalThis.matchMedia?.(q).matches; } catch { return false; } };
+    const mobile = /Mobi|Android|iPhone|iPad/i.test(nav.userAgent || '')
+      || (mm('(pointer: coarse)') && !mm('(any-pointer: fine)'));
+    this.detected = detectPreset(gpu, { mobile });
   }
 
   _initScene() {
@@ -446,21 +693,16 @@ export class FleetScene {
     // lighting: one dominant key + soft fill
     this.keyLight = new THREE.DirectionalLight(0xfff2dd, 2.6);
     this.keyLight.position.set(8, 12, 6);
-    if (QUALITY_TIERS[this.tierName].shadows) {
-      this.keyLight.castShadow = true;
-      this.keyLight.shadow.mapSize.set(1024, 1024);
-      this.keyLight.shadow.camera.left = -12;
-      this.keyLight.shadow.camera.right = 12;
-      this.keyLight.shadow.camera.top = 12;
-      this.keyLight.shadow.camera.bottom = -12;
-    }
+    this.keyLight.shadow.bias = -0.0004;
+    this.keyLight.shadow.normalBias = 0.02;
     this.scene.add(this.keyLight);
+    this.scene.add(this.keyLight.target);
     this.fillLight = new THREE.HemisphereLight(0x8fb7d9, 0x1a2433, 1.05);
     this.scene.add(this.fillLight);
 
-    // sea
-    const tier = QUALITY_TIERS[this.tierName];
+    // sea (mesh density follows the `water` setting, built in setGraphics)
     this.waterUniforms = {
+      ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
       uTime: { value: 0 },
       uRipples: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, -10, 0)) },
       uDeep: { value: new THREE.Color(0x06283d) },
@@ -468,62 +710,118 @@ export class FleetScene {
       uSky: { value: new THREE.Color(0x9fc6e0) },
       uSunDir: { value: new THREE.Vector3(0.5, 0.7, 0.4).normalize() },
       uSunColor: { value: new THREE.Color(0xffe9c4) },
+      uGlow: { value: new THREE.Color(0x59e6ff) },
+      uDetail: { value: 0 },
     };
-    this.water = new THREE.Mesh(
-      new THREE.PlaneGeometry(140, 140, tier.seaSegments, tier.seaSegments),
-      new THREE.ShaderMaterial({
-        vertexShader: WATER_VERT, fragmentShader: WATER_FRAG, uniforms: this.waterUniforms,
-      }),
-    );
-    this.water.rotation.x = -Math.PI / 2;
-    this.water.position.y = -2.2;
-    this.water.raycast = () => {};
-    this.scene.add(this.water);
+    this.waterMaterial = new THREE.ShaderMaterial({
+      vertexShader: WATER_VERT, fragmentShader: WATER_FRAG, uniforms: this.waterUniforms, fog: true,
+    });
+    this.water = null;
 
     // captain's chart table: pedestal + rim + holo surface
     this.table = new THREE.Group();
     const pedestal = new THREE.Mesh(
-      new THREE.CylinderGeometry(5.4, 6.2, 1.6, 48),
-      new THREE.MeshStandardMaterial({ color: 0x2a3340, roughness: 0.55, metalness: 0.75 }),
+      new THREE.CylinderGeometry(5.4, 6.2, 1.6, 64),
+      envify(new THREE.MeshStandardMaterial({ color: 0x2a3340, roughness: 0.55, metalness: 0.75 })),
     );
     pedestal.position.y = -0.85;
     pedestal.receiveShadow = true;
     this.table.add(pedestal);
     const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(5.45, 0.09, 12, 64),
-      new THREE.MeshStandardMaterial({
-        color: 0x59e6ff, emissive: 0x59e6ff, emissiveIntensity: 1.4, roughness: 0.3, metalness: 0.2,
-      }),
+      new THREE.TorusGeometry(5.45, 0.09, 16, 96),
+      envify(new THREE.MeshStandardMaterial({
+        color: 0x59e6ff, emissive: 0x59e6ff, emissiveIntensity: 0.8, roughness: 0.3, metalness: 0.2,
+      }), 0.5),
     );
     rim.rotation.x = Math.PI / 2;
     rim.position.y = -0.02;
     this.table.add(rim);
     const surface = new THREE.Mesh(
-      new THREE.CylinderGeometry(5.4, 5.4, 0.08, 48),
-      new THREE.MeshStandardMaterial({
+      new THREE.CylinderGeometry(5.4, 5.4, 0.08, 64),
+      envify(new THREE.MeshStandardMaterial({
         color: 0x0d2438, roughness: 0.25, metalness: 0.4,
         emissive: 0x0d2c44, emissiveIntensity: 0.5, transparent: true, opacity: 0.92,
-      }),
+      }), 0.3),
     );
     surface.position.y = -0.04;
     surface.receiveShadow = true;
     this.table.add(surface);
+    // engraved chart (range rings, bearing ticks) — `detail` setting
+    this.engraving = new THREE.Mesh(
+      new THREE.CircleGeometry(5.36, 96),
+      new THREE.MeshBasicMaterial({
+        color: 0x63e2f2, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    this.engraving.rotation.x = -Math.PI / 2;
+    this.engraving.position.y = 0.004;
+    this.engraving.visible = false;
+    this.engraving.raycast = () => {};
+    this.table.add(this.engraving);
+    // sonar sweep across the chart — `background` setting, off with reduced motion
+    this.sweepUniforms = { uAngle: { value: 0 }, uColor: { value: new THREE.Color(0x63e2f2) }, uAlpha: { value: 0.16 } };
+    this.sweep = new THREE.Mesh(
+      new THREE.CircleGeometry(5.36, 96),
+      new THREE.ShaderMaterial({
+        uniforms: this.sweepUniforms,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: /* glsl */`
+          uniform float uAngle; uniform vec3 uColor; uniform float uAlpha;
+          varying vec2 vUv;
+          void main() {
+            vec2 p = vUv * 2.0 - 1.0;
+            float r = length(p);
+            float d = mod(uAngle - atan(p.y, p.x), 6.2831853);
+            float wedge = exp(-d * 2.6) * smoothstep(1.0, 0.85, r) * smoothstep(0.0, 0.08, r);
+            float edge = smoothstep(0.05, 0.0, d) * 0.8;
+            gl_FragColor = vec4(uColor, (wedge + edge * smoothstep(1.0, 0.9, r)) * uAlpha);
+            #include <tonemapping_fragment>
+            #include <colorspace_fragment>
+          }`,
+      }),
+    );
+    this.sweep.rotation.x = -Math.PI / 2;
+    this.sweep.position.y = 0.008;
+    this.sweep.visible = false;
+    this.sweep.raycast = () => {};
+    this.table.add(this.sweep);
+    this.pedestal = pedestal;
+    this.rim = rim;
+    this.surface = surface;
     this.scene.add(this.table);
 
     // decoration from the deterministic visual stream
     const vrng = makeRng(this.visualSeed + ':decor');
     const buoyGeo = new THREE.ConeGeometry(0.3, 0.9, 8);
-    const buoyMat = new THREE.MeshStandardMaterial({ color: 0xb03a4a, roughness: 0.6 });
+    const buoyMat = envify(new THREE.MeshStandardMaterial({ color: 0xb03a4a, roughness: 0.6 }));
     const buoys = new THREE.InstancedMesh(buoyGeo, buoyMat, 10);
+    const lamps = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.09, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0x220608, emissive: 0xff4a5a, emissiveIntensity: 2.4 }),
+      10,
+    );
     const bm = new THREE.Matrix4();
+    this.buoySpots = [];
     for (let i = 0; i < 10; i++) {
       const ang = vrng.next() * Math.PI * 2;
       const r = 16 + vrng.next() * 20;
-      bm.makeTranslation(Math.cos(ang) * r, -1.6, Math.sin(ang) * r);
+      const spot = { x: Math.cos(ang) * r, z: Math.sin(ang) * r, phase: vrng.next() * Math.PI * 2 };
+      this.buoySpots.push(spot);
+      bm.makeTranslation(spot.x, -1.6, spot.z);
       buoys.setMatrixAt(i, bm);
+      bm.makeTranslation(spot.x, -1.1, spot.z);
+      lamps.setMatrixAt(i, bm);
     }
     buoys.instanceMatrix.needsUpdate = true;
+    lamps.instanceMatrix.needsUpdate = true;
+    buoys.raycast = () => {};
+    lamps.raycast = () => {};
+    this.buoys = buoys;
+    this.lamps = lamps;
     this.scene.add(buoys);
+    this.scene.add(lamps);
 
     // stars / sky dust
     const starCount = 400;
@@ -544,8 +842,32 @@ export class FleetScene {
     this.stars.raycast = () => {};
     this.scene.add(this.stars);
 
-    // particle pool
-    this.particles = new ParticlePool(QUALITY_TIERS[this.tierName].particles);
+    // particle pool (capacity follows the `particles` setting, built in setGraphics)
+    this.particles = null;
+  }
+
+  _buildWater() {
+    const seg = SEA_SEGMENTS[this.q.water] || SEA_SEGMENTS.simple;
+    const geo = new THREE.PlaneGeometry(140, 140, seg, seg);
+    if (this.water) {
+      this.water.geometry.dispose();
+      this.water.geometry = geo;
+      return;
+    }
+    this.water = new THREE.Mesh(geo, this.waterMaterial);
+    this.water.rotation.x = -Math.PI / 2;
+    this.water.position.y = -2.2;
+    this.water.raycast = () => {};
+    this.scene.add(this.water);
+  }
+
+  _buildParticles() {
+    if (this.particles) {
+      this.scene.remove(this.particles.points);
+      this.particles.points.geometry.dispose();
+      this.particles.points.material.dispose();
+    }
+    this.particles = new ParticlePool(PARTICLE_CAP[this.q.particles] || PARTICLE_CAP.low);
     this.scene.add(this.particles.points);
   }
 
@@ -559,6 +881,7 @@ export class FleetScene {
     set(this.waterUniforms.uShallow, s.waterShallow);
     set(this.waterUniforms.uSky, s.sky);
     set(this.waterUniforms.uSunColor, s.sun);
+    set(this.waterUniforms.uGlow, s.holoShip);
     this.scene.fog.color.set(s.fog);
     this.scene.background = new THREE.Color(s.fog);
     this.fillLight.color.set(s.sky);
@@ -574,40 +897,278 @@ export class FleetScene {
         });
       }
     }
-    this.table.children[1].material.color.set(s.holoGrid);
-    this.table.children[1].material.emissive.set(s.holoGrid);
+    this.rim.material.color.set(s.holoGrid);
+    this.rim.material.emissive.set(s.holoShip);
+    this.engraving.material.color.set(s.holoShip);
+    this.sweepUniforms.uColor.value.set(s.holoShip);
   }
 
-  setQuality(tierName) {
-    if (!QUALITY_TIERS[tierName] || tierName === this.tierName) return;
-    this.tierName = tierName;
-    const tier = QUALITY_TIERS[tierName];
-    this.renderer.shadowMap.enabled = tier.shadows;
-    this.keyLight.castShadow = tier.shadows;
-    // rebuild water mesh at new density
-    const old = this.water;
-    this.water = new THREE.Mesh(
-      new THREE.PlaneGeometry(140, 140, tier.seaSegments, tier.seaSegments),
-      old.material,
-    );
-    this.water.rotation.x = -Math.PI / 2;
-    this.water.position.y = -2.2;
-    this.water.raycast = () => {};
-    this.scene.remove(old);
-    old.geometry.dispose();
-    this.scene.add(this.water);
-    // rebuild particle pool
-    this.scene.remove(this.particles.points);
-    this.particles.points.geometry.dispose();
-    this.particles.points.material.dispose();
-    this.particles = new ParticlePool(tier.particles);
-    this.scene.add(this.particles.points);
+  /**
+   * Apply saved Graphics settings live (no reload). `saved` is the object the
+   * Settings panel stores: { preset, render_scale, adaptive, show_fps, <category> }.
+   */
+  setGraphics(saved, force = false) {
+    const json = JSON.stringify(saved || {});
+    if (!force && json === this._gfxJson) return;
+    this._gfxJson = json;
+    this.gfxSaved = JSON.parse(json);
+    const prev = force ? {} : (this.q || {});
+    const g = resolve(this.gfxSaved, this.detected);
+    this.q = g;
+    // shadows: enable + map size; every lit material recompiles on a toggle
+    const size = SHADOW_MAP[g.shadows];
+    const shadowToggle = this.renderer.shadowMap.enabled !== size > 0;
+    this.renderer.shadowMap.enabled = size > 0;
+    this.keyLight.castShadow = size > 0;
+    if (size > 0 && this.keyLight.shadow.mapSize.x !== size) {
+      this.keyLight.shadow.mapSize.set(size, size);
+      this.keyLight.shadow.map?.dispose();
+      this.keyLight.shadow.map = null;
+    }
+    this._fitShadow();
+    this._applyReflections();
+    if (prev.water !== g.water) this._buildWater();
+    this.waterUniforms.uDetail.value = g.water === 'detailed' ? 1 : 0;
+    if (prev.particles !== g.particles) this._buildParticles();
+    if (prev.detail !== g.detail) this._applyDetail();
+    this._applyAmbient();
+    this.adaptiveScale = 1;
+    this._frames = [];
+    this.fps = 0;
+    this.postKey = null; // rebuild the post chain on the next frame
+    this.postFailed = false;
+    this._fpsVisible(g.showFps);
+    if (shadowToggle || force) {
+      this.scene.traverse((o) => {
+        if (!o.material) return;
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;
+      });
+    }
+    this.canvas.dataset.gfxPreset = g.preset;
+    if (globalThis.document?.body) globalThis.document.body.dataset.gfxPreset = g.preset;
     this.resize();
+  }
+
+  /** What the Graphics panel shows: GPU, auto choice, resolved tiers, cost and frame rate. */
+  graphicsInfo() {
+    const px = [Math.round(this.size[0] * this.pixelRatio), Math.round(this.size[1] * this.pixelRatio)];
+    return {
+      gpu: this.gpu,
+      detected: this.detected,
+      resolved: { ...this.q },
+      summary: describe(this.q, px),
+      pixels: px,
+      fps: Math.round(this.fps || 0),
+      adaptiveScale: Math.round(this.adaptiveScale * 100) / 100,
+      postFailed: !!this.postFailed,
+    };
+  }
+
+  _applyReflections() {
+    if (this.q.reflections === 'on') {
+      if (!this._envTex) {
+        try {
+          const pm = new THREE.PMREMGenerator(this.renderer);
+          const room = new RoomEnvironment(this.renderer);
+          this._envTex = pm.fromScene(room, 0.04).texture;
+          room.dispose();
+          pm.dispose();
+        } catch { this._envTex = null; }
+      }
+      this.scene.environment = this._envTex || null;
+    } else {
+      this.scene.environment = null;
+    }
+  }
+
+  _applyDetail() {
+    const detailed = this.q.detail === 'detailed';
+    if (detailed && !this._chartTex) this._chartTex = makeChartTexture();
+    if (detailed && !this._brushTex) this._brushTex = makeBrushedTexture();
+    this.engraving.material.map = detailed ? this._chartTex : null;
+    this.engraving.material.needsUpdate = true;
+    this.engraving.visible = detailed && !!this._chartTex;
+    const ped = this.pedestal.material;
+    ped.roughnessMap = detailed ? this._brushTex : null;
+    ped.bumpMap = detailed ? this._brushTex : null;
+    ped.bumpScale = 0.6;
+    ped.roughness = detailed ? 0.8 : 0.55;
+    ped.needsUpdate = true;
+    // rebuild ship meshes with the other hull set
+    if (this._lastSync) {
+      const draft = this._lastDraft;
+      this.syncFromState(...this._lastSync);
+      if (draft) this.showDraftPlacements(...draft);
+    }
+  }
+
+  _applyAmbient() {
+    this.ambient = !!this.q && this.q.background === 'animated' && !this.reducedMotion;
+    this.sweep.visible = this.ambient;
+    if (!this.ambient) {
+      // settle ambient motion into its rest pose
+      const m = new THREE.Matrix4();
+      this.buoySpots.forEach((b, i) => {
+        m.makeTranslation(b.x, -1.6, b.z); this.buoys.setMatrixAt(i, m);
+        m.makeTranslation(b.x, -1.1, b.z); this.lamps.setMatrixAt(i, m);
+      });
+      this.buoys.instanceMatrix.needsUpdate = true;
+      this.lamps.instanceMatrix.needsUpdate = true;
+      this.lamps.material.emissiveIntensity = 2.4;
+      this._setGridGlow(0.9);
+      for (const m2 of this.wreckMats) m2.emissiveIntensity = 0.12;
+    }
+  }
+
+  _setGridGlow(k) {
+    if (!this.boards) return;
+    for (const b of [this.boards.main, this.boards.side]) b.lines.material.emissiveIntensity = k;
+  }
+
+  /** Gentle idle motion: buoys bob and blink, the sonar sweeps, grids breathe, wrecks smoulder. */
+  _animateAmbient() {
+    const t = this.time;
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const one = new THREE.Vector3(1, 1, 1);
+    const v = new THREE.Vector3();
+    this.buoySpots.forEach((b, i) => {
+      const bob = Math.sin(t * 1.1 + b.phase) * 0.12;
+      e.set(Math.sin(t * 0.9 + b.phase) * 0.08, 0, Math.cos(t * 0.7 + b.phase) * 0.08);
+      q.setFromEuler(e);
+      m.compose(v.set(b.x, -1.6 + bob, b.z), q, one);
+      this.buoys.setMatrixAt(i, m);
+      m.compose(v.set(b.x, -1.1 + bob, b.z), q, one);
+      this.lamps.setMatrixAt(i, m);
+    });
+    this.buoys.instanceMatrix.needsUpdate = true;
+    this.lamps.instanceMatrix.needsUpdate = true;
+    this.lamps.material.emissiveIntensity = (t % 2.4) < 0.5 ? 3.2 : 0.5;
+    this.sweepUniforms.uAngle.value = (t * 0.55) % (Math.PI * 2);
+    this._setGridGlow(0.9 + Math.sin(t * 1.3) * 0.12);
+    for (const w of this.wreckMats) w.emissiveIntensity = 0.14 + 0.1 * Math.max(0, Math.sin(t * 5.3 + w.id) * Math.sin(t * 2.1));
+  }
+
+  /** Fit the key light's shadow box to the table and both boards. */
+  _fitShadow() {
+    const cam = this.keyLight.shadow.camera;
+    cam.position.copy(this.keyLight.position);
+    cam.lookAt(this.keyLight.target.position);
+    cam.updateMatrixWorld();
+    const pts = [];
+    const add = (x, z) => { pts.push(new THREE.Vector3(x, -1.7, z), new THREE.Vector3(x, 1.4, z)); };
+    for (const dx of [-6.3, 6.3]) for (const dz of [-6.3, 6.3]) add(dx, dz);
+    if (this.boards) {
+      for (const id of ['main', 'side']) {
+        const b = this.boards[id];
+        const h = (b.half + 0.3) * b.group.scale.x;
+        const c = b.group.position;
+        for (const dx of [-h, h]) for (const dz of [-h, h]) add(c.x + dx, c.z + dz);
+      }
+    }
+    const box = new THREE.Box3();
+    for (const p of pts) box.expandByPoint(p.applyMatrix4(cam.matrixWorldInverse));
+    Object.assign(cam, {
+      left: box.min.x - 0.3, right: box.max.x + 0.3, bottom: box.min.y - 0.3, top: box.max.y + 0.3,
+      near: Math.max(0.1, -box.max.z - 1), far: -box.min.z + 1,
+    });
+    cam.updateProjectionMatrix();
   }
 
   setReducedMotion(flag) {
     this.reducedMotion = !!flag;
     if (this.reducedMotion) this.shake = 0;
+    if (this.q) this._applyAmbient();
+  }
+
+  /* ---------------- post-processing / resolution ---------------- */
+
+  _fpsVisible(on) {
+    const doc = globalThis.document;
+    if (!doc) return;
+    let el = doc.getElementById('fps-meter');
+    if (on && !el) {
+      el = doc.createElement('div');
+      el.id = 'fps-meter';
+      el.setAttribute('aria-hidden', 'true');
+      el.textContent = '— fps';
+      doc.body.append(el);
+    }
+    if (el) el.hidden = !on;
+  }
+
+  _postKey() {
+    const g = this.q;
+    return g.post ? [g.ao, g.bloom, g.grade, g.antialias, this.size[0], this.size[1], this.pixelRatio].join('|') : 'none';
+  }
+
+  _buildPost() {
+    const g = this.q;
+    if (this.composer) {
+      for (const pass of this.composer.passes) pass.dispose?.();
+      this.composer.dispose();
+    }
+    this.composer = null;
+    if (!g.post || this.postFailed) return;
+    const [w, h] = this.size;
+    const pr = this.pixelRatio;
+    try {
+      const target = new THREE.WebGLRenderTarget(Math.max(1, w * pr), Math.max(1, h * pr), {
+        type: THREE.HalfFloatType, samples: g.antialias === 'msaa' ? 4 : 0,
+      });
+      const composer = new EffectComposer(this.renderer, target);
+      composer.setPixelRatio(pr);
+      composer.setSize(w, h);
+      composer.addPass(new RenderPass(this.scene, this.camera));
+      if (g.ao !== 'off') {
+        const ao = new GTAOPass(this.scene, this.camera, w * pr, h * pr);
+        ao.output = GTAOPass.OUTPUT.Default;
+        ao.blendIntensity = g.ao === 'high' ? 0.7 : 0.55;
+        ao.updateGtaoMaterial({ radius: 0.45, distanceExponent: 1.4, thickness: 1.0, scale: 1.0, samples: g.ao === 'high' ? 16 : 8 });
+        ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: g.ao === 'high' ? 6 : 4, rings: 2, samples: g.ao === 'high' ? 16 : 8 });
+        composer.addPass(ao);
+      }
+      if (g.bloom === 'on') {
+        // High threshold: only emissive highlights (rim, hit spears, mines, sparks, buoy lamps) bloom.
+        composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.45, 0.4, 0.86));
+      }
+      composer.addPass(new OutputPass());
+      if (g.grade === 'on') composer.addPass(new ShaderPass(GradeShader));
+      if (g.antialias === 'smaa') composer.addPass(new SMAAPass(w * pr, h * pr));
+      if (g.antialias === 'fxaa') {
+        const fxaa = new ShaderPass(FXAAShader);
+        fxaa.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
+        composer.addPass(fxaa);
+      }
+      this.composer = composer;
+    } catch {
+      // Post-processing is an enhancement: render directly and say so in the panel.
+      this.postFailed = true;
+      this.composer = null;
+    }
+  }
+
+  // Adaptive resolution: step the render scale down when frames are slow, back up when fast.
+  _adapt(dtMs) {
+    const f = this._frames;
+    f.push(dtMs);
+    if (f.length < 90) return false;
+    const avg = f.reduce((a, b) => a + b, 0) / f.length;
+    f.length = 0;
+    this.fps = 1000 / avg;
+    const el = globalThis.document?.getElementById('fps-meter');
+    if (el && !el.hidden) el.textContent = `${Math.round(this.fps)} fps · ${Math.round(this.pixelRatio * 100) / 100}×`;
+    if (!this.q.adaptive) return false;
+    const before = this.adaptiveScale;
+    if (avg > 26) this.adaptiveScale = Math.max(0.6, Math.round((this.adaptiveScale - 0.1) * 100) / 100);
+    else if (avg < 14 && this.adaptiveScale < 1) this.adaptiveScale = Math.min(1, Math.round((this.adaptiveScale + 0.05) * 100) / 100);
+    return before !== this.adaptiveScale;
+  }
+
+  _targetPixelRatio() {
+    const g = this.q;
+    return Math.min(globalThis.devicePixelRatio || 1, g.dpr) * g.scale * this.adaptiveScale;
   }
 
   /* ---------------- boards ---------------- */
@@ -631,6 +1192,7 @@ export class FleetScene {
     this.boards = { main, side };
     this.clearShips();
     this.interactiveBoard = null;
+    this._fitShadow();
   }
 
   cellWorldPos(boardId, cell, out = new THREE.Vector3()) {
@@ -661,6 +1223,7 @@ export class FleetScene {
     this.enemyShipMeshes.clear();
     for (const mesh of this.draftMeshes || []) { mesh.parent?.remove(mesh); mesh.geometry.dispose(); }
     this.draftMeshes = [];
+    this.wreckMats = [];
     this.clearPreview();
     if (this.boards) {
       for (const b of [this.boards.main, this.boards.side]) {
@@ -675,14 +1238,23 @@ export class FleetScene {
   }
 
   _shipMaterial(kind) {
+    const detailed = this.q?.detail === 'detailed';
     if (kind === 'own') {
-      return new THREE.MeshStandardMaterial({ color: 0x8a97a8, roughness: 0.45, metalness: 0.85 });
+      if (detailed) {
+        return envify(new THREE.MeshPhysicalMaterial({
+          color: 0xffffff, vertexColors: true, roughness: 0.42, metalness: 0.7,
+          clearcoat: 0.55, clearcoatRoughness: 0.28,
+        }), 1.2);
+      }
+      return envify(new THREE.MeshStandardMaterial({ color: 0x8a97a8, roughness: 0.45, metalness: 0.85 }));
     }
     if (kind === 'wreck') {
-      return new THREE.MeshStandardMaterial({
+      const m = envify(new THREE.MeshStandardMaterial({
         color: 0x3a2f2f, roughness: 0.9, metalness: 0.2,
         emissive: 0xff3300, emissiveIntensity: 0.12,
-      });
+      }), 0.5);
+      this.wreckMats.push(m);
+      return m;
     }
     return new THREE.MeshStandardMaterial({
       color: this.holoShipColor || 0x59e6ff, transparent: true, opacity: 0.4,
@@ -691,9 +1263,10 @@ export class FleetScene {
   }
 
   _addShipMesh(board, ship, kind) {
-    const geo = buildHullGeometry(ship.size);
+    const geo = buildHullGeometry(ship.size, this.q?.detail === 'detailed');
     const mesh = new THREE.Mesh(geo, this._shipMaterial(kind));
-    mesh.castShadow = kind === 'own';
+    mesh.castShadow = kind !== 'draft';
+    mesh.receiveShadow = kind === 'own';
     // orient along ship cells
     const first = cellToXY(ship.cells[0], board.gridSize);
     const last = cellToXY(ship.cells[ship.cells.length - 1], board.gridSize);
@@ -717,14 +1290,16 @@ export class FleetScene {
     } else if (kind === 'mine') {
       mesh = new THREE.Mesh(
         new THREE.OctahedronGeometry(0.24),
-        new THREE.MeshStandardMaterial({ color: MINE_COLOR, emissive: MINE_COLOR, emissiveIntensity: 0.9 }),
+        envify(new THREE.MeshStandardMaterial({ color: MINE_COLOR, emissive: MINE_COLOR, emissiveIntensity: 1.6, roughness: 0.3, metalness: 0.4 })),
       );
+      mesh.castShadow = true;
       mesh.position.y = 0.2;
     } else { // hit
       mesh = new THREE.Mesh(
         new THREE.ConeGeometry(0.2, 0.42, 4),
-        new THREE.MeshStandardMaterial({ color: HIT_COLOR, emissive: HIT_COLOR, emissiveIntensity: 1.1 }),
+        envify(new THREE.MeshStandardMaterial({ color: HIT_COLOR, emissive: HIT_COLOR, emissiveIntensity: 2.0, roughness: 0.35 })),
       );
+      mesh.castShadow = true;
       mesh.position.y = 0.24;
       mesh.rotation.y = Math.PI / 4;
     }
@@ -744,6 +1319,8 @@ export class FleetScene {
    */
   syncFromState(state, viewerId, mode) {
     if (!this.boards || this.boards.main.gridSize !== state.gridSize) this.buildBoards(state.gridSize);
+    this._lastSync = [state, viewerId, mode];
+    this._lastDraft = null;
     this.clearShips();
     this.viewerId = viewerId;
     const me = state.players.find((p) => p.id === viewerId);
@@ -816,6 +1393,7 @@ export class FleetScene {
   showDraftPlacements(fleet, placements, gridSize) {
     for (const m of this.draftMeshes || []) { m.parent?.remove(m); m.geometry.dispose(); }
     this.draftMeshes = [];
+    this._lastDraft = [fleet, placements, gridSize];
     const board = this.boards?.main;
     if (!board) return;
     for (const pl of placements.values()) {
@@ -1088,7 +1666,7 @@ export class FleetScene {
     const start = dest.clone().add(new THREE.Vector3(2.5, 6.5, 5.5));
     const proj = new THREE.Mesh(
       new THREE.SphereGeometry(0.11, 10, 10),
-      new THREE.MeshBasicMaterial({ color: 0xaefcff }),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0xaefcff).multiplyScalar(2.2) }),
     );
     proj.visible = false;
     this.scene.add(proj);
@@ -1112,6 +1690,14 @@ export class FleetScene {
           const color = result === 'miss' ? MISS_COLOR : result === 'mine' ? MINE_COLOR : HIT_COLOR;
           const count = result === 'miss' ? 26 : result === 'mine' ? 70 : result === 'sunk' ? 90 : 55;
           scene.particles.emit(dest, { count: Math.min(count, 90), color, speed: result === 'miss' ? 1.4 : 3.0, up: result === 'miss' ? 2.2 : 3.4 });
+          if (scene.q?.particles === 'high' && !scene.reducedMotion) {
+            // hot sparks and slow embers (hits) or fine spray (misses)
+            if (result === 'miss') scene.particles.emit(dest, { count: 30, color: 0xeaf6ff, speed: 0.9, up: 3.6, size: 1.2, life: 1.0, spread: 0.25 });
+            else {
+              scene.particles.emit(dest, { count: 40, color: 0xffd08a, speed: 4.2, up: 4.0, size: 1.1, life: 0.55, spread: 0.2 });
+              scene.particles.emit(dest, { count: 24, color: 0xff5a1e, speed: 0.8, up: 1.4, size: 3.2, life: 1.6, spread: 0.5 });
+            }
+          }
           scene.addRipple(dest, result === 'miss' ? 0.5 : 1.0);
           if (result !== 'miss') scene.shake = result === 'sunk' || result === 'mine' ? 1.0 : 0.55;
           this.done = true;
@@ -1159,22 +1745,41 @@ export class FleetScene {
       if (this.jobs.length) {
         this.jobs = this.jobs.filter((j) => !j.update(dt));
       }
+      if (this.ambient) this._animateAmbient();
       this.particles.update(dt);
       this._updateCamera(dt);
-      this.renderer.render(this.scene, this.camera);
+      this._render(dt);
     };
     this._raf = requestAnimationFrame(loop);
   }
 
   pause() { this.running = false; if (this._raf) cancelAnimationFrame(this._raf); }
 
-  resize() {
+  _render(dt) {
+    if (this._adapt(dt * 1000)) this._applySize();
+    const key = this._postKey();
+    if (key !== this.postKey) {
+      this.postKey = key;
+      this._buildPost();
+    }
+    if (this.composer) this.composer.render(dt);
+    else this.renderer.render(this.scene, this.camera);
+  }
+
+  _applySize() {
     const w = this.canvas.clientWidth || this.canvas.parentElement?.clientWidth || 1;
     const h = this.canvas.clientHeight || this.canvas.parentElement?.clientHeight || 1;
-    const tier = QUALITY_TIERS[this.tierName];
-    const dpr = Math.min(globalThis.devicePixelRatio || 1, tier.dpr) * tier.renderScale;
-    this.renderer.setPixelRatio(dpr);
+    const ratio = this._targetPixelRatio();
+    this.size = [w, h];
+    this.pixelRatio = ratio;
+    this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(w, h, false);
+    return [w, h];
+  }
+
+  resize() {
+    if (!this.q) return;
+    const [w, h] = this._applySize();
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.refit();
@@ -1192,6 +1797,10 @@ export class FleetScene {
         else o.material.dispose();
       }
     });
+    this.composer?.dispose?.();
+    this._envTex?.dispose();
+    this._chartTex?.dispose();
+    this._brushTex?.dispose();
     this.renderer.dispose();
   }
 }

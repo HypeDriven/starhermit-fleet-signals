@@ -19,6 +19,10 @@ import {
   zipStore, unzipFirstEntry, bytesToBase64, base64ToBytes,
   decodeJwt, readLaunchToken, resolveNickname, createCloudSave,
 } from '../src/platform/starhermit.js';
+import {
+  PRESETS, CATEGORIES, detectPreset, resolve, presetTier, choosePreset, describe, fromLegacyTier,
+} from '../src/render/gfx.js';
+import { GFX_LOCALES, gfxStrings, pickGfxLocale } from '../src/ui/gfx-i18n.js';
 
 let passed = 0;
 let failed = 0;
@@ -738,6 +742,57 @@ test('platform: cloud save debounces, uploads zipped base64, flushes pending', a
   cloud.push(doc); cloud.push(doc);
   await cloud.flush();
   eq(uploaded.length, 2, 'rapid pushes coalesce to a single upload');
+});
+
+/* ==================== graphics quality model ==================== */
+
+test('gfx: detectPreset maps GPU strings to presets', () => {
+  eq(detectPreset('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)'), 'low');
+  eq(detectPreset('llvmpipe (LLVM 15.0.7, 256 bits)'), 'low');
+  eq(detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0)'), 'high');
+  eq(detectPreset('Apple M2'), 'high');
+  eq(detectPreset('ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11)'), 'balanced');
+  eq(detectPreset('Adreno (TM) 650'), 'balanced');
+  eq(detectPreset(''), 'balanced');
+  eq(detectPreset('Apple M2', { mobile: true }), 'balanced', 'touch devices cap Auto at Balanced');
+  eq(detectPreset('SwiftShader', { mobile: true }), 'low');
+});
+
+test('gfx: resolve applies preset, overrides and clamps render scale', () => {
+  const auto = resolve({}, 'low');
+  eq(auto.preset, 'low'); eq(auto.auto, true); eq(auto.post, false, 'Low renders without a composer');
+  eq(auto.shadows, 'off'); eq(auto.adaptive, true); eq(auto.showFps, false);
+  const hi = resolve({ preset: 'high', shadows: 'off', bloom: 'bogus' }, 'low');
+  eq(hi.preset, 'high'); eq(hi.auto, false);
+  eq(hi.shadows, 'off', 'override wins'); eq(hi.bloom, 'on', 'invalid override falls back to the preset');
+  eq(hi.ao, presetTier('high', 'ao'));
+  eq(resolve({ preset: 'balanced', render_scale: 9 }).renderScale, 2);
+  eq(resolve({ preset: 'balanced', render_scale: 0.1 }).renderScale, 0.5);
+  eq(resolve({ preset: 'ultra', render_scale: 1 }).scale, 1.25);
+  eq(resolve({ preset: 'nope' }, undefined).preset, 'balanced');
+  for (const p of PRESETS) for (const [cat, tiers] of Object.entries(CATEGORIES)) {
+    assert(tiers.includes(presetTier(p, cat)), `${p}.${cat} is a valid tier`);
+  }
+  assert(/no shadows/.test(describe(auto, [800, 600])) && /800×600 px/.test(describe(auto, [800, 600])));
+});
+
+test('gfx: choosing a preset clears overrides but keeps scale and toggles', () => {
+  const next = choosePreset({ preset: 'high', shadows: 'off', bloom: 'off', render_scale: 1.5, show_fps: true }, 'low');
+  eq(JSON.stringify(next), JSON.stringify({ preset: 'low', render_scale: 1.5, show_fps: true }));
+  eq(choosePreset({}, 'auto').preset, 'auto');
+  eq(fromLegacyTier('medium'), 'balanced'); eq(fromLegacyTier('auto'), 'auto');
+});
+
+test('gfx: Graphics panel strings exist in every locale', () => {
+  const ref = gfxStrings('en-US');
+  for (const loc of GFX_LOCALES) {
+    const t = gfxStrings(loc);
+    for (const k of Object.keys(ref)) assert(t[k], `${loc}.${k}`);
+    for (const k of Object.keys(CATEGORIES)) assert(t.cat[k], `${loc}.cat.${k}`);
+    for (const tiers of Object.values(CATEGORIES)) for (const k of tiers) assert(t.tier[k], `${loc}.tier.${k}`);
+    for (const k of PRESETS) assert(t.tier[k], `${loc}.tier.${k}`);
+  }
+  eq(pickGfxLocale('es-MX'), 'es-419'); eq(pickGfxLocale('fr-CA'), 'fr-CA'); eq(pickGfxLocale('ja-JP'), 'en-US');
 });
 
 /* ==================== summary ==================== */

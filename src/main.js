@@ -5,6 +5,7 @@
  * loading, and the top-level app controller.
  */
 import { FleetScene } from './render/scene.js';
+import { fromLegacyTier } from './render/gfx.js';
 import { createAudio } from './audio/audio.js';
 import { loadSave, storeSave, defaultSave, checksumDoc, mergeSaves, SAVE_VERSION } from './platform/save.js';
 import {
@@ -163,9 +164,14 @@ async function boot() {
   }
 
   const audio = createAudio();
+  // Graphics settings: carry the pre-panel quality tier over as a preset once.
+  if (!doc.settings.graphics || typeof doc.settings.graphics !== 'object') {
+    doc.settings.graphics = { preset: fromLegacyTier(doc.settings.qualityTier) };
+  }
+  delete doc.settings.qualityTier;
   const scene = new FleetScene(canvas, {
     theme: null, // applied via App.applySettings
-    qualityTier: doc.settings.qualityTier,
+    graphics: doc.settings.graphics,
     reducedMotion: doc.settings.reducedMotion || matchMedia('(prefers-reduced-motion: reduce)').matches,
     visualSeed: 'fleet-signals-v1',
   });

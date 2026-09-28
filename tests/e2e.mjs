@@ -66,7 +66,7 @@ async function runPass({ name, viewport, hasTouch }) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
-    if (m.type() === 'error' && !browserNoise.test(m.text())) errors.push(`console: ${m.text()}`);
+    if ((m.type() === 'error' || m.type() === 'warning') && !browserNoise.test(m.text())) errors.push(`console ${m.type()}: ${m.text()}`);
   });
 
   const step = async (n, fn) => { await fn(); console.log(`ok - [${name}] ${n}`); };
@@ -111,6 +111,52 @@ async function runPass({ name, viewport, hasTouch }) {
       }));
       if (!applied.motion || !applied.palette) throw new Error('settings not applied: ' + JSON.stringify(applied));
       await page.screenshot({ path: SHOT('settings') });
+      await page.click('[data-act="done"]');
+      await page.waitForSelector('.game-title');
+    });
+
+    await step('graphics settings: presets, override, fps, persistence', async () => {
+      const preset = () => page.evaluate(() => document.body.dataset.gfxPreset);
+      const summary = () => page.textContent('#gfx-summary');
+      await page.click('button[data-act="settings"]');
+      await page.waitForSelector('#gfx-section #gfx-preset');
+      await page.locator('#gfx-preset').scrollIntoViewIfNeeded();
+      if ((await preset()) !== 'low') throw new Error('headless software GPU should resolve Auto to Low, got ' + (await preset()));
+      if (!/detected/i.test(await page.textContent('#gfx-preset option[value="auto"]'))) throw new Error('Auto option lacks the detected tier');
+      await page.selectOption('#gfx-preset', 'low');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'low');
+      if (!/no shadows/.test(await summary())) throw new Error('Low summary: ' + (await summary()));
+      await page.selectOption('#gfx-preset', 'high');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'high' && !!window.__fleet.scene.composer);
+      await page.waitForFunction(() => /SMAA/.test(document.querySelector('#gfx-summary').textContent));
+      if (!/From preset/.test(await page.textContent('#gfx-cat-shadows option[value="preset"]'))) throw new Error('category default label');
+      await page.selectOption('#gfx-cat-shadows', 'off');
+      await page.waitForFunction(() => /no shadows/.test(document.querySelector('#gfx-summary').textContent)
+        && window.__fleet.scene.renderer.shadowMap.enabled === false);
+      await page.check('#gfx-fps');
+      await page.waitForSelector('#fps-meter:not([hidden])', { state: 'attached' });
+      // the whole section fits the viewport width (no horizontal cut-off)
+      const overflow = await page.evaluate(() => [...document.querySelectorAll('#gfx-section select, #gfx-section input')]
+        .some((n) => { const r = n.getBoundingClientRect(); return r.left < 0 || r.right > window.innerWidth + 1; }));
+      if (overflow) throw new Error('graphics controls overflow the viewport');
+      await page.locator('#gfx-section').screenshot({ path: SHOT('graphics') });
+      await page.waitForTimeout(400); // let the render loop run a few frames on High
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForSelector('.game-title', { timeout: 15000 });
+      if ((await preset()) !== 'high') throw new Error('preset did not survive reload: ' + (await preset()));
+      await page.click('button[data-act="settings"]');
+      await page.waitForSelector('#gfx-preset');
+      const kept = await page.evaluate(() => [document.querySelector('#gfx-preset').value, document.querySelector('#gfx-cat-shadows').value, document.querySelector('#gfx-fps').checked]);
+      if (kept.join() !== 'high,off,true') throw new Error('graphics settings not persisted: ' + kept.join());
+      // Ultra builds the heaviest chain (GTAO + MSAA target) without console noise
+      await page.selectOption('#gfx-preset', 'ultra');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'ultra' && !!window.__fleet.scene.composer);
+      await page.waitForTimeout(400);
+      // back to Auto (Low on this software GPU) for a fast playthrough; choosing a preset clears overrides
+      await page.selectOption('#gfx-preset', 'auto');
+      await page.uncheck('#gfx-fps');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'low' && !window.__fleet.scene.composer
+        && document.querySelector('#gfx-cat-shadows').value === 'preset');
       await page.click('[data-act="done"]');
       await page.waitForSelector('.game-title');
     });
@@ -238,7 +284,7 @@ async function runHostedPass() {
   const errors = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
-    if (m.type() === 'error' && !browserNoise.test(m.text())) errors.push(`console: ${m.text()}`);
+    if ((m.type() === 'error' || m.type() === 'warning') && !browserNoise.test(m.text())) errors.push(`console ${m.type()}: ${m.text()}`);
   });
   try {
     await page.goto(BASE, { waitUntil: 'load' });

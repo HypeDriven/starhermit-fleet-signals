@@ -11,6 +11,8 @@ import {
   STAGES, THEMES, CHALLENGES, dailyStage, stageById, challengeById, CONTENT_VERSION,
 } from '../content/stages.js';
 import { LESSONS, lessonById } from '../content/tutorial.js';
+import { PRESETS, CATEGORIES, choosePreset, presetTier } from '../render/gfx.js';
+import { pickGfxLocale, gfxStrings, fill } from './gfx-i18n.js';
 import {
   ACHIEVEMENTS, unlockAchievement, recordBoardEntry, storeSave,
 } from '../platform/save.js';
@@ -107,7 +109,7 @@ export class App {
     root.style.setProperty('--text', theme.ui.text);
     this.scene.setTheme(theme);
     this.scene.setReducedMotion(!!s.reducedMotion);
-    if (s.qualityTier && s.qualityTier !== 'auto') this.scene.setQuality(s.qualityTier);
+    this.scene.setGraphics(s.graphics || {});
     for (const bus of ['music', 'effects', 'ambience', 'voice']) {
       this.audio.setVolume(bus, s[bus] ?? 1);
     }
@@ -553,14 +555,7 @@ export class App {
               ${toggle('muted', 'Mute all audio')}
               ${toggle('captions', 'Captions for meaningful audio')}
             </fieldset>
-            <fieldset><legend>Graphics</legend>
-              <label for="set-quality">Quality tier</label>
-              <select id="set-quality">
-                <option value="auto" ${s.qualityTier === 'auto' ? 'selected' : ''}>Auto</option>
-                <option value="low" ${s.qualityTier === 'low' ? 'selected' : ''}>Low — 30 fps fallback</option>
-                <option value="medium" ${s.qualityTier === 'medium' ? 'selected' : ''}>Medium</option>
-                <option value="high" ${s.qualityTier === 'high' ? 'selected' : ''}>High</option>
-              </select>
+            <fieldset><legend>Display</legend>
               <label for="set-theme">Visual theme</label>
               <select id="set-theme">${themeOpts}</select>
               ${toggle('reducedMotion', 'Reduced motion (no camera swoops, shake, or heavy particles)')}
@@ -583,6 +578,7 @@ export class App {
               <p>Tutorial progress: ${this.doc.tutorial.done ? 'complete' : 'not finished'}.</p>
               <button data-act="replay-tutorial">Replay tutorial</button>
             </fieldset>
+            <fieldset class="gfx-section" id="gfx-section" data-gfx-section></fieldset>
           </div>
           <div class="menu-row" style="margin-top:14px">
             <button class="primary" data-act="done">Done</button>
@@ -600,6 +596,7 @@ export class App {
       this.persist();
       this.platform.track('settings-change', { key });
     });
+    this._wireGraphicsSection(node.querySelector('#gfx-section'));
     const dismiss = this._presentScreen(node);
     node.addEventListener('click', (ev) => {
       const act = ev.target.closest('[data-act]')?.dataset.act;
@@ -610,6 +607,102 @@ export class App {
       }
       if (act === 'replay-tutorial') { this.play('ui-press'); dismiss(); this.startLesson(LESSONS[0]); }
     });
+  }
+
+  /**
+   * Settings → Graphics: quality preset (Auto/Low/Balanced/High/Ultra),
+   * render scale, one override per effect, adaptive resolution, frame-rate
+   * readout and a GPU/cost summary. Changes apply live and persist in the
+   * save document (`settings.graphics`).
+   */
+  _wireGraphicsSection(box) {
+    const s = this.doc.settings;
+    if (!s.graphics || typeof s.graphics !== 'object') s.graphics = {};
+    const T = gfxStrings(pickGfxLocale(globalThis.navigator?.language));
+    const tierName = (t) => T.tier[t] || t;
+    const render = () => {
+      const g = s.graphics;
+      const info = this.scene.graphicsInfo();
+      const active = info.resolved.preset;
+      const presetOpts = [`<option value="auto" ${PRESETS.includes(g.preset) ? '' : 'selected'}>${esc(fill(T.auto, { tier: tierName(info.detected) }))}</option>`]
+        .concat(PRESETS.map((p) => `<option value="${p}" ${g.preset === p ? 'selected' : ''}>${esc(tierName(p))}</option>`)).join('');
+      const scale = Math.round((Number(g.render_scale) || 1) * 100);
+      const cats = Object.entries(CATEGORIES).map(([cat, tiers]) => `
+        <div class="gfx-cat">
+          <label for="gfx-cat-${cat}">${esc(T.cat[cat])}</label>
+          <select id="gfx-cat-${cat}" data-gfx-cat="${cat}">
+            <option value="preset" ${tiers.includes(g[cat]) ? '' : 'selected'}>${esc(fill(T.fromPreset, { tier: tierName(presetTier(active, cat)) }))}</option>
+            ${tiers.map((t) => `<option value="${t}" ${g[cat] === t ? 'selected' : ''}>${esc(tierName(t))}</option>`).join('')}
+          </select>
+        </div>`).join('');
+      box.innerHTML = `
+        <legend>${esc(T.graphics)}</legend>
+        <div class="gfx-top">
+          <div>
+            <label for="gfx-preset">${esc(T.quality)}</label>
+            <select id="gfx-preset" data-gfx="preset">${presetOpts}</select>
+          </div>
+          <div>
+            <label for="gfx-scale" class="gfx-scale-label"><span>${esc(T.renderScale)}</span> <output id="gfx-scale-val" for="gfx-scale">${scale}%</output></label>
+            <input type="range" id="gfx-scale" data-gfx="render_scale" min="50" max="200" step="5" value="${scale}">
+          </div>
+        </div>
+        <div class="gfx-cats">${cats}</div>
+        <div class="toggle-row"><input type="checkbox" id="gfx-adaptive" data-gfx="adaptive" ${g.adaptive === false ? '' : 'checked'}><label for="gfx-adaptive">${esc(T.adaptive)}</label></div>
+        <div class="toggle-row"><input type="checkbox" id="gfx-fps" data-gfx="show_fps" ${g.show_fps ? 'checked' : ''}><label for="gfx-fps">${esc(T.showFps)}</label></div>
+        <p id="gfx-summary" class="gfx-summary"></p>
+        <p id="gfx-post-note" class="gfx-note" role="status" hidden>${esc(T.postFailed)}</p>`;
+      summary();
+    };
+    const summary = () => {
+      const info = this.scene.graphicsInfo();
+      const sum = box.querySelector('#gfx-summary');
+      if (sum) sum.textContent = `${info.gpu} · ${info.summary}${info.resolved.showFps && info.fps ? ` · ${info.fps} fps` : ''}`;
+      const note = box.querySelector('#gfx-post-note');
+      if (note) note.hidden = !info.postFailed;
+      box.dataset.gfxPreset = info.resolved.preset;
+    };
+    const apply = () => {
+      this.scene.setGraphics(s.graphics);
+      this.persist();
+      this.platform.track('settings-change', { key: 'graphics' });
+    };
+    box.addEventListener('input', (ev) => {
+      const t = ev.target;
+      if (t.id === 'gfx-scale') {
+        s.graphics.render_scale = Number(t.value) / 100;
+        box.querySelector('#gfx-scale-val').textContent = `${t.value}%`;
+        apply();
+        summary();
+      }
+    });
+    box.addEventListener('change', (ev) => {
+      const t = ev.target;
+      const key = t.dataset.gfx;
+      const cat = t.dataset.gfxCat;
+      if (key === 'preset') {
+        s.graphics = choosePreset(s.graphics, t.value);
+        apply();
+        render();
+        box.querySelector('#gfx-preset')?.focus();
+        return;
+      }
+      if (cat) {
+        if (t.value === 'preset') delete s.graphics[cat];
+        else s.graphics[cat] = t.value;
+      } else if (key === 'adaptive') s.graphics.adaptive = t.checked;
+      else if (key === 'show_fps') s.graphics.show_fps = t.checked;
+      else return;
+      apply();
+      summary();
+    });
+    render();
+    // the post chain is (re)built on the next frame; refresh the summary/fps line while open
+    const timer = setInterval(() => {
+      if (!box.isConnected) { clearInterval(timer); return; }
+      summary();
+    }, 1000);
+    requestAnimationFrame(() => requestAnimationFrame(summary));
   }
 
   /**

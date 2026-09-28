@@ -370,6 +370,31 @@ label { display: block; margin: 10px 0 4px; color: var(--text-dim); }
 .toggle-row input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); }
 .toggle-row label { margin: 0; flex: 1; color: var(--text); }
 
+/* Settings → Graphics (spans both columns on wide panels) */
+.settings-grid .gfx-section { grid-column: 1 / -1; min-width: 0; }
+.gfx-top, .gfx-cats { display: grid; grid-template-columns: 1fr; gap: 0 16px; }
+@media (min-width: 560px) { .gfx-top { grid-template-columns: 1fr 1fr; } }
+.gfx-cats { grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+.gfx-section select, .gfx-section input[type="range"] { width: 100%; box-sizing: border-box; }
+.gfx-scale-label { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; }
+.gfx-scale-label output { color: var(--text); font-variant-numeric: tabular-nums; }
+.gfx-summary { color: var(--text-dim); font-size: 0.85em; margin: 10px 0 0; overflow-wrap: anywhere; }
+.gfx-note { color: var(--warn); font-size: 0.9em; margin: 6px 0 0; }
+#fps-meter {
+  position: fixed;
+  left: calc(8px + var(--sal));
+  top: 50%;
+  z-index: 60;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(4, 10, 18, 0.7);
+  color: var(--text-dim);
+  font: 12px/1.4 ui-monospace, monospace;
+  pointer-events: none;
+}
+#fps-meter[hidden] { display: none; }
+@media (min-width: 1024px) { #fps-meter { top: auto; bottom: calc(96px + var(--sab)); } }
+
 /* ---------------- ship tray (placement) ---------------- */
 
 .ship-list { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }

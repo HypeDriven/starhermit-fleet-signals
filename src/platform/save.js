@@ -19,7 +19,7 @@ export function defaultSave() {
     profile: { name: 'Guest Captain', guest: true, avatar: 'signal-flag' },
     settings: {
       music: 0.7, effects: 0.9, ambience: 0.6, voice: 0.8,
-      muted: false, qualityTier: 'auto', reducedMotion: false,
+      muted: false, graphics: { preset: 'auto' }, reducedMotion: false,
       highContrast: false, palette: 'default', largerText: false,
       leftHanded: false, haptics: true, holdToConfirm: false,
       captions: false, cameraView: 'auto', theme: DEFAULT_THEME,
