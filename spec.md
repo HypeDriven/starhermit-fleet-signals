@@ -261,3 +261,7 @@ Conventions follow https://wiki.starhermit.com/ (manifest, same-origin `/api`, a
 - Score submission and remote leaderboards do not exist, so impossible-score rejection is not applicable.
 
 **Design intent not yet implemented.** Full localization; online Hosted Table through the StarHermit session API with the existing `server.js` contract; adaptive music stems on the music bus; honouring `allowUndo` from stage content; hold-to-confirm for Resign/Reset.
+
+## Browser interference
+
+`browser-guard.js` (loaded from `index.html`) suppresses browser UI that gets in the way of play: the right-click context menu, the iOS long-press callout, copy / cut / paste, and page text selection. Text fields (inputs, textareas, selects, contenteditable) keep normal selection, context menu and clipboard behaviour.
