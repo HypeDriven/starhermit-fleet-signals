@@ -1,16 +1,14 @@
 /**
  * Bootstrap: capability detection, asset/lifecycle wiring, platform adapter
- * (server time, launch-token auth + refresh, account nickname, cloud-save
- * mirror with sync status; telemetry/presence are local-dev-only), save
- * loading, and the top-level app controller.
+ * (StarHermit SDK: launch token + renewal, account nickname, cloud-save
+ * mirror with sync status, settings KV, key bindings), save loading, and the
+ * top-level app controller.
  */
 import { FleetScene } from './render/scene.js';
 import { fromLegacyTier } from './render/gfx.js';
 import { createAudio } from './audio/audio.js';
 import { loadSave, storeSave, defaultSave, checksumDoc, mergeSaves, SAVE_VERSION } from './platform/save.js';
-import {
-  readLaunchToken, createApi, resolveNickname, scheduleTokenRefresh, createCloudSave,
-} from './platform/starhermit.js';
+import { createPlatform, applyRemoteSettings } from './platform/starhermit.js';
 import { App } from './ui/app.js';
 
 function webglAvailable() {
@@ -20,70 +18,6 @@ function webglAvailable() {
   } catch {
     return false;
   }
-}
-
-/* ---------------- platform adapter (offline-tolerant) ---------------- */
-
-function createPlatform(auth, api) {
-  let offsetMs = 0;
-  let serverSynced = false;
-  // Hosted mode activates iff a launch token was read from the URL.
-  const hosted = !!(auth && auth.token && auth.slug);
-
-  // Synchronize daily boundaries with host time when hosted; round-trip adjusted.
-  (async () => {
-    try {
-      const t0 = Date.now();
-      const res = await fetch('/api/v1/time', {
-        cache: 'no-store',
-        headers: hosted ? { Authorization: `Bearer ${auth.token}` } : {},
-      });
-      if (!res.ok) return;
-      const t1 = Date.now();
-      const body = await res.json();
-      const serverMs = typeof body.time === 'number' ? body.time : Date.parse(body.time);
-      if (Number.isFinite(serverMs)) {
-        offsetMs = serverMs - Math.round((t0 + t1) / 2);
-        serverSynced = true;
-      }
-    } catch { /* offline/local play: local UTC clock is authoritative */ }
-  })();
-
-  if (hosted) {
-    // Refresh the 60-minute token on a 45-minute schedule (60 s retry).
-    scheduleTokenRefresh(auth, api);
-  }
-
-  return {
-    hosted,
-    /** Account nickname (profile lookup); null until resolved or offline. */
-    accountName: null,
-    /** Cloud-save mirror state: loading|saving|synced|offline|error. */
-    syncStatus: hosted ? 'loading' : 'offline',
-    /** App hook: re-render the profile screen when identity/sync changes. */
-    onChange: null,
-    get serverSynced() { return serverSynced; },
-    now() { return Date.now() + offsetMs; },
-    utcToday() { return new Date(this.now()).toISOString().slice(0, 10); },
-    /**
-     * Anonymous funnel events only; never message content or pointer trails.
-     * The platform has no per-game telemetry route — local dev server only.
-     */
-    track(name, props) {
-      if (hosted) return;
-      const allowed = ['round-start', 'round-end', 'tutorial-step', 'settings-change', 'error', 'first-action', 'input-modality', 'retry'];
-      if (!allowed.includes(name)) return;
-      const payload = { event: name, at: new Date().toISOString(), ...(props || {}) };
-      if (navigator.sendBeacon) {
-        try { navigator.sendBeacon('/api/v1/telemetry', JSON.stringify(payload)); } catch { /* offline */ }
-      }
-    },
-    presence(active) {
-      // Local dev server shim only; no presence endpoint exists on-platform.
-      if (hosted || !active) return;
-      fetch('/api/v1/presence', { method: 'POST', body: '{}' }).catch(() => {});
-    },
-  };
 }
 
 /* ---------------- boot ---------------- */
@@ -104,24 +38,20 @@ async function boot() {
     return;
   }
 
-  // Launch token: fragment #game_token read once and stripped. Absent → the
-  // game is identical to local/offline play; localStorage is the save.
-  const auth = readLaunchToken();
-  const api = createApi(auth || { token: null });
+  // Launch token: the SDK reads #game_token / #access_token once and strips
+  // it. Absent → the game is identical to local/offline play (no requests).
+  const sh = window.StarHermit || null;
+  sh?.init();
+  const platform = createPlatform(sh);
+  const cloud = platform.cloud;
 
   let { doc, migrated, corrupted } = loadSave();
-  const platform = createPlatform(auth, api);
 
   // Cloud save: remote slot is a mirror; on conflict the remote doc wins.
   // localStorage stays the offline cache regardless of outcome.
-  let cloud = null;
   if (platform.hosted) {
-    cloud = createCloudSave({
-      api, auth, slug: auth.slug,
-      onStatus: (s) => { platform.syncStatus = s; platform.onChange?.(); },
-    });
     try {
-      const remote = await cloud.load();
+      const [remote, remoteSettings] = await Promise.all([cloud.load(), platform.getSettings(), platform.loadKeys()]);
       const valid = remote && remote.version === SAVE_VERSION && remote.checksum === checksumDoc(remote);
       if (valid) {
         const m = mergeSaves(doc, remote);
@@ -134,25 +64,31 @@ async function boot() {
         } else {
           platform.syncStatus = 'synced';
         }
+      } else if (!remote) {
+        cloud.push(doc); // empty slot: seed it from the local doc
       } else {
-        platform.syncStatus = 'synced'; // no slot yet, identical, or unreadable
+        platform.syncStatus = 'synced'; // identical or unreadable
       }
+      // Platform preferences win over local defaults when signed in.
+      if (applyRemoteSettings(doc.settings, remoteSettings)) storeSave(doc);
+      platform.markSettingsBaseline(doc.settings);
     } catch { /* network down: local cache is authoritative */ }
   }
 
   const saveHooks = {
-    persist(d) { storeSave(d); cloud?.push(d); },
+    persist(d) { storeSave(d); cloud.push(d); platform.syncSettings(d.settings); },
     reset() {
       const fresh = defaultSave();
       Object.keys(doc).forEach((k) => delete doc[k]);
       Object.assign(doc, fresh);
       storeSave(doc);
-      cloud?.push(doc);
+      cloud.push(doc);
+      platform.syncSettings(doc.settings);
     },
   };
 
   if (platform.hosted) {
-    resolveNickname(api, auth.sub).then((name) => {
+    platform.nickname().then((name) => {
       platform.accountName = name;
       // Fresh guest docs take the account nickname as their local display name.
       if (name && doc.profile.guest && doc.profile.name === 'Guest Captain') {
@@ -197,7 +133,7 @@ async function boot() {
     if (document.hidden) {
       scene.pause();
       audio.suspend();
-      cloud?.flush();
+      cloud.flush();
       if (app.session && !app.hotseat && app.phase !== 'results') app.paused = true;
     } else {
       scene.start();
@@ -210,19 +146,10 @@ async function boot() {
     }
   });
 
-  window.addEventListener('pagehide', () => cloud?.flush());
-
-  // throttled presence heartbeat while actively playing (local dev only)
-  setInterval(() => {
-    if (app.session && !document.hidden && app.phase === 'battle') platform.presence(true);
-  }, 30000);
+  window.addEventListener('pagehide', () => cloud.flush());
 
   window.addEventListener('resize', () => scene.resize());
   window.addEventListener('orientationchange', () => setTimeout(() => scene.resize(), 120));
-
-  window.addEventListener('error', (ev) => {
-    platform.track('error', { category: ev.message ? 'runtime' : 'resource' });
-  });
 
   // debug/testing handle (no rules shortcuts exposed)
   window.__fleet = { app, scene, platform, version: 1 };

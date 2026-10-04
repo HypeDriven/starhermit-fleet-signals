@@ -15,8 +15,8 @@
  *
  * Self-contained: starts its own static server on an ephemeral port.
  * (server.js in this repo is the StarHermit authoritative game script, NOT
- * a static file server, so it is not used.) /api/* calls get a 204 so the
- * offline-tolerant platform adapter stays quiet.
+ * a static file server, so it is not used.) /api/* serves StarHermit platform
+ * mocks for the signed-in pass; the standalone passes must make no /api call.
  *
  * Note (resolved 2026-09-04, see knownissues.md #5): Pause → Settings → Done → Resume
  * used to unmount the game HUD/tray (showSettings() called mount() which wiped #ui).
@@ -40,10 +40,21 @@ const MIME = {
 };
 const browserNoise = /GL Driver Message|GPU stall due to ReadPixels|Automatic fallback to software WebGL|EnableWebGLDeveloperExtensions/i;
 
+const apiLog = [];
 const server = http.createServer(async (req, res) => {
   try {
     const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-    if (path.startsWith('/api/')) { res.writeHead(204); return res.end(); } // offline host shim
+    if (path.startsWith('/api/')) { // StarHermit platform mocks (hosted pass only)
+      apiLog.push(`${req.method} ${path}`);
+      const json = (b, st = 200) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
+      if (path.endsWith('/profile')) return json({ username: 'raw_name', nickname: 'Salty Admiral' });
+      if (path.endsWith('/settings') && req.method === 'GET') return json({ settings: { music: 0.3 } });
+      if (path.endsWith('/settings')) return json({ settings: {} });
+      if (path.endsWith('/controls')) return json({ actions: [{ action: 'rotate', codes: ['KeyQ'] }] });
+      if (path.endsWith('/cloud-saves/game:fleet-test/info')) return json({ exists: false });
+      if (path.endsWith('/cloud-saves/game:fleet-test')) return json({});
+      return json({ error: 'not found' }, 404);
+    }
     const file = normalize(join(ROOT, path === '/' ? '/index.html' : path));
     if (!file.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
     const data = await readFile(file);
@@ -272,6 +283,49 @@ async function runPass({ name, viewport, hasTouch }) {
     await context.close();
   }
   if (errors.length) throw new Error(`[${name}] page errors:\n` + errors.join('\n'));
+  if (apiLog.length) throw new Error(`[${name}] standalone play made platform calls: ${apiLog.join(', ')}`);
+}
+
+/** Signed-in launch: nickname, synced settings, rebinding in Help, invite link, cloud seed. */
+async function runSignedInPass() {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('console', (m) => {
+    if ((m.type() === 'error' || m.type() === 'warning') && !browserNoise.test(m.text())) errors.push(`console ${m.type()}: ${m.text()}`);
+  });
+  await page.addInitScript(() => {
+    window.__copied = [];
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t) => { window.__copied.push(t); } } });
+  });
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const token = 'h.' + b64u({ sub: 'cap-1234567', game_scope: 'fleet-test', exp: Math.floor(Date.now() / 1000) + 3600 }) + '.s';
+  try {
+    await page.goto(`${BASE}/#game_token=${token}`, { waitUntil: 'load' });
+    await page.waitForSelector('.game-title', { timeout: 15000 });
+    if (new URL(page.url()).hash) throw new Error('launch token left in the URL');
+    const music = await page.evaluate(() => window.__fleet.app.doc.settings.music);
+    if (music !== 0.3) throw new Error('platform settings not applied: ' + music);
+    if (await page.locator('[data-act="signin"]').count()) throw new Error('sign-in shown while signed in');
+    await page.click('[data-act="invite"]');
+    await page.waitForFunction(() => window.__copied.length === 1);
+    const link = await page.evaluate(() => window.__copied[0]);
+    if (!/\/game-invite\/cap-1234567\/fleet-test$/.test(link)) throw new Error('bad invite link ' + link);
+    await page.screenshot({ path: '/tmp/fleet-signals-e2e-title-signedin.png' });
+    await page.click('[data-act="help"]');
+    const help = await page.textContent('.kbd-table');
+    if (!/Q\s*Rotate ship/.test(help)) throw new Error('help does not show the platform binding: ' + help);
+    await page.click('[data-act="done"]');
+    await page.click('[data-act="profile"]');
+    await page.waitForFunction(() => /Salty Admiral/.test(document.querySelector('.account-row')?.textContent || ''));
+    for (let i = 0; i < 50 && !apiLog.includes('PUT /api/v1/me/cloud-saves/game:fleet-test'); i++) await page.waitForTimeout(100); // debounced ~2 s
+    if (!apiLog.includes('PUT /api/v1/me/cloud-saves/game:fleet-test')) throw new Error('empty slot not seeded: ' + apiLog.join(', '));
+    console.log('ok - [signed-in] nickname, synced settings, effective bindings, invite link, cloud seed');
+  } finally {
+    await context.close();
+  }
+  if (errors.length) throw new Error('[signed-in] page errors:\n' + errors.join('\n'));
 }
 
 /**
@@ -312,6 +366,7 @@ try {
   await runPass({ name: 'desktop', viewport: { width: 1280, height: 800 }, hasTouch: false });
   await runPass({ name: 'mobile', viewport: { width: 390, height: 844 }, hasTouch: true });
   await runHostedPass();
+  await runSignedInPass();
   console.log('\nE2E PASS — full Fleet Signals playthrough clean on desktop + mobile + hosted roster, no page errors');
 } finally {
   await browser.close();

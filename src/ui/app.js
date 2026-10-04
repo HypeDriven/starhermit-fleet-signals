@@ -13,6 +13,7 @@ import {
 import { LESSONS, lessonById } from '../content/tutorial.js';
 import { PRESETS, CATEGORIES, choosePreset, presetTier } from '../render/gfx.js';
 import { pickGfxLocale, gfxStrings, fill } from './gfx-i18n.js';
+import { platformStrings } from './platform-i18n.js';
 import {
   ACHIEVEMENTS, unlockAchievement, recordBoardEntry, storeSave,
 } from '../platform/save.js';
@@ -41,7 +42,7 @@ function el(html) {
 export class App {
   /**
    * @param {object} deps { scene, audio, saveDoc, platform, saveHooks }
-   * platform: { utcToday(): string, track(name, props?), serverSynced: bool }
+   * platform: createPlatform() facade (utcToday, hosted, keys, sign-in, invite link, cloud)
    * saveHooks: { persist(doc): void }
    */
   constructor({ scene, audio, saveDoc, platform, saveHooks }) {
@@ -83,6 +84,11 @@ export class App {
     if (this.platform.onChange === null) {
       this.platform.onChange = () => { if (this._profileOpen) this.showProfile(); };
     }
+    // Launch-token renewal refused: keep playing locally, re-offer sign-in.
+    this.platform.onSignedOut = () => {
+      this.toast(platformStrings().signedOut, false, 4000);
+      if (this.phase === 'menu' && this.ui.querySelector('[aria-label="Fleet Signals title"]')) this.showTitle();
+    };
     if (this.audio.setCaptionSink) {
       this.audio.setCaptionSink((text) => { this.captionLine.textContent = text; });
     }
@@ -186,6 +192,10 @@ export class App {
     const resume = this._resumeAvailable();
     const dailyDone = !!this.doc.dailies[this.platform.utcToday()];
     const journeyDone = Object.keys(this.doc.journey.completed).length;
+    const ps = platformStrings();
+    const account = this.platform.canSignIn()
+      ? `<div class="menu-row"><button class="ghost" data-act="signin">${esc(ps.signIn)}</button></div>`
+      : this.platform.hosted ? `<div class="menu-row"><button class="ghost" data-act="invite">${esc(ps.invite)}</button></div>` : '';
     const node = el(`
       <div class="screen" role="main" aria-label="Fleet Signals title">
         <div class="panel title-panel">
@@ -207,6 +217,7 @@ export class App {
               <button data-act="learn">Learn</button>
               <button data-act="hosted">Hosted Table</button>
             </div>
+            ${account}
             <div class="menu-row">
               <button class="ghost" data-act="profile">Profile</button>
               <button class="ghost" data-act="settings">Settings</button>
@@ -232,6 +243,8 @@ export class App {
         settings: () => this.showSettings(() => this.showTitle()),
         help: () => this.showHelp(() => this.showTitle()),
         resume: () => this.resumeMatch(),
+        signin: () => this.platform.signIn(),
+        invite: () => this._copyInvite(),
       })[act]?.();
     });
     this.mount(node);
@@ -594,7 +607,6 @@ export class App {
       else s[key] = ev.target.value;
       this.applySettings();
       this.persist();
-      this.platform.track('settings-change', { key });
     });
     this._wireGraphicsSection(node.querySelector('#gfx-section'));
     const dismiss = this._presentScreen(node);
@@ -665,7 +677,6 @@ export class App {
     const apply = () => {
       this.scene.setGraphics(s.graphics);
       this.persist();
-      this.platform.track('settings-change', { key: 'graphics' });
     };
     box.addEventListener('input', (ev) => {
       const t = ev.target;
@@ -721,6 +732,30 @@ export class App {
     return () => o.remove();
   }
 
+  async _copyInvite() {
+    const link = this.platform.inviteLink();
+    if (!link) return;
+    const ps = platformStrings();
+    try {
+      await navigator.clipboard.writeText(link);
+      this.toast(ps.inviteCopied);
+    } catch {
+      this.toast(ps.inviteFailed, true);
+    }
+  }
+
+  /** Display label for the effective binding of an action ("R", "Esc", "←"). */
+  _keyLabel(action) {
+    const name = (code) => ({ Escape: 'Esc', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', NumpadEnter: 'Enter' }[code]
+      || code.replace(/^(Key|Digit|Numpad)/, ''));
+    return [...new Set((this.platform.keys[action] || []).map(name))].map((k) => `<kbd>${esc(k)}</kbd>`).join(' / ');
+  }
+
+  _actionForCode(code) {
+    for (const [action, codes] of Object.entries(this.platform.keys)) if (codes.includes(code)) return action;
+    return null;
+  }
+
   /* ================= help ================= */
 
   showHelp(returnTo) {
@@ -742,15 +777,15 @@ export class App {
           <p>Victory 500 · each hit 25 · each ship sunk 100 · accuracy up to 300 · shots spared 10 each (limited charts) · invalid actions −15. Ties break on objective, fewer invalid actions, then faster time.</p>
           <h3>Controls</h3>
           <table class="kbd-table">
-            <tr><td><kbd>←↑↓→</kbd></td><td>Move the chart cursor</td></tr>
-            <tr><td><kbd>Enter</kbd> / <kbd>Space</kbd></td><td>Confirm / fire / place ship</td></tr>
-            <tr><td><kbd>R</kbd></td><td>Rotate ship (deployment)</td></tr>
-            <tr><td><kbd>A</kbd></td><td>Auto-deploy fleet</td></tr>
-            <tr><td><kbd>N</kbd></td><td>Toggle note mode (private deductions)</td></tr>
-            <tr><td><kbd>H</kbd></td><td>Hint (where allowed)</td></tr>
-            <tr><td><kbd>U</kbd></td><td>Undo (practice only)</td></tr>
-            <tr><td><kbd>C</kbd></td><td>Reset camera</td></tr>
-            <tr><td><kbd>Esc</kbd></td><td>Pause / cancel</td></tr>
+            <tr><td>${['cursorLeft', 'cursorUp', 'cursorDown', 'cursorRight'].map((a) => this._keyLabel(a)).join(' ')}</td><td>Move the chart cursor</td></tr>
+            <tr><td>${this._keyLabel('confirm')}</td><td>Confirm / fire / place ship</td></tr>
+            <tr><td>${this._keyLabel('rotate')}</td><td>Rotate ship (deployment)</td></tr>
+            <tr><td>${this._keyLabel('autoDeploy')}</td><td>Auto-deploy fleet</td></tr>
+            <tr><td>${this._keyLabel('notes')}</td><td>Toggle note mode (private deductions)</td></tr>
+            <tr><td>${this._keyLabel('hint')}</td><td>Hint (where allowed)</td></tr>
+            <tr><td>${this._keyLabel('undo')}</td><td>Undo (practice only)</td></tr>
+            <tr><td>${this._keyLabel('camera')}</td><td>Reset camera</td></tr>
+            <tr><td>${this._keyLabel('pause')}</td><td>Pause / cancel</td></tr>
             <tr><td>Gamepad</td><td>Stick/D-pad aim · A confirm · B cancel · Start pause</td></tr>
             <tr><td>Touch</td><td>Tap to select, tap again (or Fire) to commit. Drag the table to shift the camera.</td></tr>
           </table>
@@ -828,7 +863,6 @@ export class App {
     });
     this.scene.buildBoards(config.gridSize);
     this.scene.setTheme(THEMES.find((t) => t.id === (content?.theme || this.doc.settings.theme)) || THEMES[0]);
-    this.platform.track('round-start', { mode, contentId: config.contentId });
     this._buildGameScreen();
     this._beginPlacement();
   }
@@ -874,7 +908,6 @@ export class App {
       const lessonId = this.lesson.def.id;
       this.play('lesson-done');
       this.toast('Lesson objective complete!', false, 3000);
-      this.platform.track('tutorial-step', { lesson: lessonId });
       this.lesson = null;
       const idx = LESSONS.findIndex((l) => l.id === lessonId);
       this.doc.tutorial.step = Math.max(this.doc.tutorial.step, (idx >= 0 ? idx : 0) + 1);
@@ -1130,7 +1163,6 @@ export class App {
     if (this.lesson && this.lesson.def.steps[this.lesson.stepIdx]?.waitFor === 'place-all') {
       this.play('lesson-done');
       this.toast('Fleet deployed. Objective complete!', false, 3000);
-      this.platform.track('tutorial-step', { lesson: this.lesson.def.id });
       this.lesson = null;
     }
   }
@@ -1266,7 +1298,6 @@ export class App {
     const { x, y } = cellToXY(cell, st.gridSize);
     try {
       const { events } = this.session.command({ type: 'fire', playerId: viewer, targetId: this.hotTarget, x, y });
-      this.platform.track('first-action', this.session.state.tick <= 4 ? { quick: true } : undefined);
       this._saveResume();
       this.play('fire');
       this.inputLocked = true;
@@ -1460,7 +1491,6 @@ export class App {
       }
       this.play('achievement');
     }
-    this.platform.track('round-end', { mode: this.mode, won: res.won });
     this.persist();
   }
 
@@ -1769,7 +1799,9 @@ export class App {
     document.addEventListener('keydown', (ev) => {
       if (ev.target.matches('input, select, textarea')) return;
       const st = this.session?.state;
-      if (ev.key === 'Escape') {
+      const action = this._actionForCode(ev.code);
+      if (!action) return;
+      if (action === 'pause') {
         // Esc is documented as "pause / cancel": it opens the pause menu and
         // closes it again. Other overlays keep handling their own buttons.
         if (this.pauseOverlay && document.contains(this.pauseOverlay)) {
@@ -1798,35 +1830,35 @@ export class App {
         this.scene.onCellHover?.(this.scene.interactiveBoard, cell);
         ev.preventDefault();
       };
-      switch (ev.key) {
-        case 'ArrowLeft': move(-1, 0); break;
-        case 'ArrowRight': move(1, 0); break;
-        case 'ArrowUp': move(0, -1); break;
-        case 'ArrowDown': move(0, 1); break;
-        case 'Enter': case ' ':
+      switch (action) {
+        case 'cursorLeft': move(-1, 0); break;
+        case 'cursorRight': move(1, 0); break;
+        case 'cursorUp': move(0, -1); break;
+        case 'cursorDown': move(0, 1); break;
+        case 'confirm':
           if (this.cursorCell !== null) this.scene.onCellPick?.(this.scene.interactiveBoard, this.cursorCell);
           ev.preventDefault();
           break;
-        case 'r': case 'R':
+        case 'rotate':
           if (this.phase === 'placement' && this.placement) {
             this.placement.dir = this.placement.dir === 'h' ? 'v' : 'h';
             this.play('rotate');
             if (this.cursorCell !== null) this._previewPlacement(this.cursorCell);
           }
           break;
-        case 'a': case 'A':
+        case 'autoDeploy':
           if (this.phase === 'placement') this._autoPlace();
           break;
-        case 'n': case 'N':
+        case 'notes':
           if (this.phase === 'battle') { this.annotateMode = !this.annotateMode; this._renderTray(); }
           break;
-        case 'h': case 'H':
+        case 'hint':
           if (this.phase === 'battle' && this.session.assists.hints) this._showHint();
           break;
-        case 'u': case 'U':
+        case 'undo':
           if (this.phase === 'battle') this._undo();
           break;
-        case 'c': case 'C':
+        case 'camera':
           this.scene.resetCamera();
           break;
       }
@@ -1845,7 +1877,6 @@ export class App {
       if (!this.gamepadState.seen) {
         this.gamepadState.seen = true;
         this.toast('Gamepad connected — stick aims, A confirms, B cancels.');
-        this.platform.track('input-modality', { kind: 'gamepad' });
       }
       if (!this.session || this.inputLocked || this.paused) return;
       if (this.phase !== 'battle' && this.phase !== 'placement') return;

@@ -5,7 +5,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "node tests/run.js",
+    "test": "node tests/run.js && node --test tests/platform.test.mjs",
     "test:e2e": "node tests/e2e.mjs",
     "serve": "python3 -m http.server 8080"
   },
