@@ -1916,11 +1916,12 @@ export class App {
       const g = st.gridSize;
       let html = '';
       const rect = this.scene.canvas.getBoundingClientRect();
+      const u = (globalThis.UIScale && globalThis.UIScale.value) || 1; // label offsets grow with the UI scale
       for (let i = 0; i < g; i++) {
         const col = this.scene.projectCell(boardId, i, rect);
         const row = this.scene.projectCell(boardId, i * g, rect);
-        if (col.visible) html += `<span class="cell-label" style="left:${col.x}px;top:${col.y - 22}px">${String.fromCharCode(65 + i)}</span>`;
-        if (row.visible) html += `<span class="cell-label" style="left:${row.x - 26}px;top:${row.y}px">${i + 1}</span>`;
+        if (col.visible) html += `<span class="cell-label" style="left:${col.x}px;top:${col.y - 22 * u}px">${String.fromCharCode(65 + i)}</span>`;
+        if (row.visible) html += `<span class="cell-label" style="left:${row.x - 26 * u}px;top:${row.y}px">${i + 1}</span>`;
       }
       if (this._lastLabels !== html) {
         this.labelLayer.innerHTML = html;

@@ -125,6 +125,7 @@
 **Compact (<1024 px).** Rails become slide-in drawers toggled by ☰ / ≡ buttons in the HUD, capped at 45 vh.
 **Portrait mobile.** Tray scrolls horizontally in the thumb zone, objective subtitle hidden; title art strip ≤ 26 vh and results art ≤ 22 vh (hidden entirely under 560 px height).
 **Landscape mobile (≤500 px tall).** Rails 190 px, tighter HUD and tray padding.
+**Large screens (>1600×1000).** `ui-scale.js` sets `--ui-scale` (min(width/1600, height/1000), capped at 2.5; 2560×1440 → 1.44, 3840×2160 → 2.16); the `#ui` layer, caption line and FPS meter are CSS-`zoom`ed by it with their vw/vh lengths divided by it, so HUD, rails, tray, panels and toasts grow proportionally and the chart is re-fitted inside the larger HUD's safe rectangle; the full-screen canvas and the projected coordinate-label layer are not zoomed — the labels multiply their font size and offsets by the scale instead.
 **Safe areas.** `env(safe-area-inset-*)` offsets HUD, rails, tray, caption line and screens. Must never be cut off: the tray (Fire/Confirm), the pause button, the turn badge, the results total and buttons, and the A–J/1–10 labels the label layer projects each frame.
 
 ## 8. Art direction
