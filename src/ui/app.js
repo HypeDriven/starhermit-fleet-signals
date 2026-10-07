@@ -1437,7 +1437,7 @@ export class App {
 
     const par = this.content?.par;
     const stars = E.starRating({ won: res.won, shotsUsed: res.shotsUsed, accuracy: res.accuracy, par });
-    this.lastResult = { res, stars, viewer };
+    this.lastResult = { res, stars, viewer, post: ['daily', 'journey', 'challenge'].includes(this.mode) && !this.hotseat };
 
     if (this.mode === 'journey' && this.content) {
       const prev = this.doc.journey.completed[this.content.id];
@@ -1494,6 +1494,18 @@ export class App {
     this.persist();
   }
 
+  /** Signed in only: post a ranked match (not practice, learn or hot-seat) and show the board rank. */
+  _postToLeaderboard(line, eligible, total) {
+    if (!line || !eligible || !this.platform.hosted) return;
+    const ps = platformStrings();
+    line.hidden = false;
+    line.textContent = ps.lbPosting;
+    this.platform.submitScore(total).then((r) => {
+      line.textContent = !r.posted ? ps.lbNotPosted
+        : r.rank ? ps.lbRank.replace('{rank}', r.rank) : ps.lbPosted;
+    });
+  }
+
   _challengePassed(res) {
     const c = this.content?.constraint;
     if (!c) return res.won;
@@ -1534,6 +1546,7 @@ export class App {
           ${rows}
           <tr class="total"><td>Total</td><td>${res.total}</td></tr>
         </table>
+        <p class="lb-line" data-lb hidden></p>
         <p><small>Reason: ${esc(st.terminalReason || '—')} · Seed: <code>${esc(st.seed)}</code> · Rules v${E.RULES_VERSION} · Time ${Math.round(this.session.elapsedMs() / 1000)}s</small></p>
         <div class="menu-row">
           <button class="primary" data-act="retry">Retry</button>
@@ -1542,6 +1555,7 @@ export class App {
           <button class="ghost" data-act="title">Title</button>
         </div>
       </div>`);
+    this._postToLeaderboard(o.querySelector('[data-lb]'), this.lastResult.post, res.total);
     o.addEventListener('click', (ev) => {
       const act = ev.target.closest('[data-act]')?.dataset.act;
       if (!act) return;

@@ -36,12 +36,13 @@
 | `src/ui/gfx-i18n.js` | Settings → Graphics strings in 9 locales, `pickGfxLocale` |
 | `src/ui/platform-i18n.js` | StarHermit account strings (sign-in, invite, toasts, sign-out notice) in 9 locales |
 | `src/ui/styles.css` | Layout, responsive rules, accessibility modes, palette tokens |
-| `server.js` | StarHermit authoritative game script (`createSession`, `handleMessage`, `checkDeadline`, `getSnapshot`, `sessionSummary`); doubles as a dev static host when run directly |
+| `score-script.js` | StarHermit platform script (`server=`): range-checks a finished ranked match's total and posts it to the `high-score` leaderboard (canonical copy in the games repo's `tools/score-script.js`) |
+| `server.js` | Authoritative session module (`createSession`, `handleMessage`, `checkDeadline`, `getSnapshot`, `sessionSummary`); doubles as a dev static host when run directly |
 | `assets/` | `key-art.webp`, `results-win.webp`, `results-lose.webp` (FLUX.2 klein) |
 | `sfx/` | 22 Opus clips, `manifest.txt` (canonical), `manifest.json` (generator input), `manifest.md` (generated) |
 | `vendor/addons/` | Three.js r160 (0.160.1) addons: EffectComposer, RenderPass, ShaderPass, OutputPass, GTAOPass, UnrealBloomPass, SMAAPass, FXAAShader, RoomEnvironment and their shader/math dependencies |
 | `tests/run.js` | unit/property/fuzz/golden tests (`npm test`, followed by `tests/platform.test.mjs`) · `tests/e2e.mjs` Playwright playthrough · `tests/ai-restart.mjs` AI-pump regression · `tests/smoke.html` legacy in-browser suite |
-| `starhermit.txt` | `name=Fleet Signals`, `launch=index.html`, `server=server.js`, `cover=coverart.png` |
+| `starhermit.txt` | `name=Fleet Signals`, `launch=index.html`, `server=score-script.js`, `cover=coverart.png` |
 
 ## 2. Vision and design pillars
 
@@ -207,7 +208,7 @@ Conventions follow https://wiki.starhermit.com/. `src/platform/starhermit.js` is
 
 | Feature | Status in this build |
 |---|---|
-| Manifest / launch | `starhermit.txt` with `name`, `launch=index.html`, `owner`, `server=server.js`, `cover`, and one `control.<action>` line per keyboard action |
+| Manifest / launch | `starhermit.txt` with `name`, `launch=index.html`, `owner`, `server=score-script.js`, `cover`, and one `control.<action>` line per keyboard action |
 | Launch / auth | Hosted mode activates iff the SDK reads `#game_token=<jwt>[&session_id=]` (library launch) or `#access_token=<jwt>` (sign-in return); the fragment is stripped, `sub` / `game_scope` give the player and slug (never hard-coded), every call is same-origin with `Authorization: Bearer`, and the SDK renews the token before expiry. If renewal is refused the game toasts that progress keeps saving on this device, the profile shows Offline, and the title re-offers sign-in where available |
 | Sign-in | On `<slug>.starhermit.com` without a token the title shows **Sign in with StarHermit** (SDK redirect); hidden when signed in and when running locally |
 | Identity / profile | Hosted: profile nickname (`Player <id>` fallback; never `/api/v1/me`, never usernames) on the profile screen, adopted as the default local display name; offline: local guest profile only (`profile.name`, 18 chars) |
@@ -215,10 +216,10 @@ Conventions follow https://wiki.starhermit.com/. `src/platform/starhermit.js` is
 | Cloud save | Hosted: slot `game:<slug>` (`/api/v1/me/cloud-saves/game:<slug>`): slot info checked at boot, remote-preferred merge via `mergeSaves`, an empty slot is seeded from the local doc, ~2 s debounce + `pagehide`/hidden flush, sync status on the profile screen; localStorage stays the offline cache |
 | Settings sync | Hosted: volumes, mute, graphics, reduced motion, high contrast, palette, larger text, left-handed, haptics, hold-to-confirm, captions, camera view and theme are patched into the settings KV (same keys as `save.settings`) whenever a persist changes them; at boot platform values are applied over local defaults |
 | Controls | Keyboard input is routed by `KeyboardEvent.code` through `StarHermit.loadBindings(DEFAULT_KEYS)`: `cursorLeft/Right/Up/Down`, `confirm`, `rotate`, `autoDeploy`, `notes`, `hint`, `undo`, `camera`, `pause`; Help lists the effective keys |
-| Leaderboards | local board in the save doc (score-desc, cap 100, with ruleset, content version, seed, assists, duration); clients never submit scores |
+| Leaderboards | local board in the save doc (score-desc, cap 100, with ruleset, content version, seed, assists, duration). Hosted: every finished Daily, Journey or Challenge match against the AI also posts its total through `StarHermit.submitScores` (a practice session whose `score-script.js` posts it to the platform `high-score` board — integer, higher is better, 0–1,000,000; negative totals post as 0) and the results panel shows "Posting score…", then "Leaderboard rank: #N" (or posted / not posted), localized in the nine locales (`src/ui/platform-i18n.js`). Practice, Learn and Hot-seat post nothing; offline shows no line and sends nothing |
 | Achievements | 5 static keys unlocked idempotently in the local save: `first-victory`, `sharpshooter`, `daily-streak-3`, `journey-mastery`, `long-voyage` |
-| Game script | `server.js` exports an authoritative session API (membership check, 4096-byte payload cap, 20 msgs / 10 s rate limit, idempotent command ids, 24 h turn deadlines with auto-resign, redacted `getSnapshot`, `sessionSummary`, result `{winner, reason, scores, finishedAt}`) used by the unit tests and the dev host; it is an ES module importing the rules engine, not a Jint `globalThis.game` script, so no platform session runs it |
-| Sessions / matchmaking / invites / chat / replays / voice | not used: there is no platform game script to run online matches; Hosted Table is local pass-and-play |
+| Game script | `server.js` exports an authoritative session API (membership check, 4096-byte payload cap, 20 msgs / 10 s rate limit, idempotent command ids, 24 h turn deadlines with auto-resign, redacted `getSnapshot`, `sessionSummary`, result `{winner, reason, scores, finishedAt}`) used by the unit tests and the dev host; it is an ES module importing the rules engine, not a Jint `globalThis.game` script, so no platform session runs it (the platform runs `score-script.js`) |
+| Sessions / matchmaking / invites / chat / replays / voice | not used: there is no platform game script to run online matches (the only platform session is the score post's practice session); Hosted Table is local pass-and-play |
 | Server time / telemetry / presence | not used: Daily Signal uses the local UTC clock and nothing is sent |
 
 ## 13. Technical architecture
@@ -262,7 +263,7 @@ Conventions follow https://wiki.starhermit.com/. `src/platform/starhermit.js` is
 - `tutorialFlags` on stages are data only; in-stage first-time hints come from the objective text and tray, not per-flag prompts.
 - Toasts stack at the top centre and can overlap the results art on phones when several fire in quick succession (rapid hint use).
 - Rendering fidelity and audio are not assessed by automation (SwiftShader, no gesture in headless Chrome); e2e verifies absence of errors only.
-- Score submission and remote leaderboards do not exist, so impossible-score rejection is not applicable.
+- The platform board accepts any integer total in 0–1,000,000; the match itself is not re-simulated server-side.
 
 **Design intent not yet implemented.** Full localization; online Hosted Table through the StarHermit session API with the existing `server.js` contract; adaptive music stems on the music bus; honouring `allowUndo` from stage content; hold-to-confirm for Resign/Reset.
 

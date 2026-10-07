@@ -92,6 +92,20 @@ export function createPlatform(sh) {
       this.keys = { ...DEFAULT_KEYS, ...(await sh.loadBindings(DEFAULT_KEYS).catch(() => DEFAULT_KEYS)) };
       return this.keys;
     },
+    /**
+     * Post a finished ranked match's total to the `high-score` board (score-script.js);
+     * resolves { posted, rank } — the player's rank there, or null. Offline → not posted.
+     */
+    async submitScore(total) {
+      if (!hosted() || typeof sh.submitScores !== 'function') return { posted: false, rank: null };
+      const keys = await sh.submitScores({ 'high-score': Math.max(0, Math.round(total)) }).catch(() => []);
+      if (!keys.includes('high-score')) return { posted: false, rank: null };
+      try {
+        const r = await sh.leaderboard('high-score', { pageSize: 100 });
+        const me = (r.items || []).find((i) => i.userId === sh.userId);
+        return { posted: true, rank: me ? me.rank : null };
+      } catch { return { posted: true, rank: null }; }
+    },
     /** Cloud-save mirror of the local save doc (slot game:<slug>). */
     cloud: {
       push(doc) {

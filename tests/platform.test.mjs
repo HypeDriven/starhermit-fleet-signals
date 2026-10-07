@@ -90,7 +90,30 @@ test('standalone: no network calls at all', async () => {
   assert.deepEqual(await h.platform.loadKeys(), DEFAULT_KEYS);
   assert.equal(await h.platform.nickname(), null);
   assert.equal(h.platform.inviteLink(), null);
+  assert.deepEqual(await h.platform.submitScore(700), { posted: false, rank: null });
   assert.equal(h.calls.length, 0);
+});
+
+test('hosted: submitScore posts high-score and reads the rank', async () => {
+  const h = harness('https://fleet-id.starhermit.com/#game_token=' + TOKEN);
+  const sent = [];
+  h.sh.submitScores = async (s) => { sent.push(s); return Object.keys(s); };
+  h.sh.leaderboard = async (key) => ({ items: key === 'high-score' ? [{ userId: 'cap-1234567', rank: 4 }] : [] });
+  assert.deepEqual(await h.platform.submitScore(-30), { posted: true, rank: 4 });
+  assert.deepEqual(sent, [{ 'high-score': 0 }]);
+  h.sh.submitScores = async () => [];
+  assert.deepEqual(await h.platform.submitScore(900), { posted: false, rank: null });
+});
+
+test('leaderboard line strings in every locale', async () => {
+  const { platformStrings, PLATFORM_LOCALES } = await import('../src/ui/platform-i18n.js');
+  assert.equal(PLATFORM_LOCALES.length, 9);
+  for (const l of PLATFORM_LOCALES) {
+    const t = platformStrings(l);
+    for (const k of ['lbPosting', 'lbRank', 'lbPosted', 'lbNotPosted']) assert.ok(t[k], l + ' ' + k);
+    assert.ok(t.lbRank.includes('{rank}'));
+  }
+  assert.match(platformStrings('de-DE').lbRank, /Platz/);
 });
 
 test('sign-in offered on the platform host without a token', () => {
