@@ -76,7 +76,7 @@ export function createAudio() {
       const g = ctx.createGain();
       g.gain.value = volumes[bus];
       g.connect(master);
-      busGains[bus] = g;
+      busGains[bus] = (globalThis.GameOptions ? globalThis.GameOptions.tagBus(g, bus) : g);
     }
     // Shared noise buffer: ~2s of brown-ish noise (integrated white noise).
     const len = Math.floor(ctx.sampleRate * 2);
@@ -103,7 +103,7 @@ export function createAudio() {
   }
 
   function osc(type, freq, t0, t1, dest) {
-    const o = ctx.createOscillator();
+    const o = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
     o.type = type;
     o.frequency.setValueAtTime(freq, t0);
     o.connect(dest);
@@ -113,7 +113,7 @@ export function createAudio() {
   }
 
   function noise(t0, t1, dest, playbackRate = 1) {
-    const src = ctx.createBufferSource();
+    const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), null) : ctx.createBufferSource());
     src.buffer = noiseBuf;
     src.loop = true;
     src.playbackRate.value = playbackRate;
@@ -195,7 +195,7 @@ export function createAudio() {
   function playSample(name) {
     const buf = sampleBuffers[name];
     if (!buf) return false;
-    const src = ctx.createBufferSource();
+    const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), name) : ctx.createBufferSource());
     src.buffer = buf;
     src.connect(busGains.effects);
     src.start();
@@ -416,7 +416,7 @@ export function createAudio() {
     filter.frequency.value = tense ? 700 : 500;
     padGain.connect(filter);
     filter.connect(busGains.music);
-    const lfo = ctx.createOscillator();
+    const lfo = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
     lfo.type = 'sine';
     lfo.frequency.value = tense ? 0.13 : 0.07;
     const lfoGain = ctx.createGain();
@@ -426,7 +426,7 @@ export function createAudio() {
     lfo.start();
     const base = tense ? 110 : 98;
     [0, 1.008, 0.5].forEach((det, i) => {
-      const o = ctx.createOscillator();
+      const o = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
       o.type = i === 2 ? 'triangle' : 'sawtooth';
       o.frequency.value = base * (i === 2 ? 2 : 1) * (det || 1);
       o.connect(padGain);
@@ -474,12 +474,12 @@ export function createAudio() {
     g.gain.value = 0.05;
     filter.connect(g);
     g.connect(busGains.ambience);
-    const src = ctx.createBufferSource();
+    const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), null) : ctx.createBufferSource());
     src.buffer = noiseBuf;
     src.loop = true;
     src.connect(filter);
     src.start();
-    const lfo = ctx.createOscillator();
+    const lfo = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
     lfo.type = 'sine';
     lfo.frequency.value = 0.06;
     const lfoGain = ctx.createGain();
@@ -519,7 +519,7 @@ export function createAudio() {
       sampleGain.gain.setValueAtTime(0.0001, ts);
       sampleGain.gain.exponentialRampToValueAtTime(0.35, ts + 2.5);
       sampleGain.connect(busGains.ambience);
-      const loop = ctx.createBufferSource();
+      const loop = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), null) : ctx.createBufferSource());
       loop.buffer = buf;
       loop.loop = true;
       loop.connect(sampleGain);

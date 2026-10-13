@@ -1762,8 +1762,8 @@ export class FleetScene {
       this.postKey = key;
       this._buildPost();
     }
-    if (this.composer) this.composer.render(dt);
-    else this.renderer.render(this.scene, this.camera);
+    if (this.composer) (globalThis.GameOptions ? globalThis.GameOptions.draw(this.composer.renderer, () => this.composer.render(dt)) : this.composer.render(dt));
+    else (globalThis.GameOptions ? globalThis.GameOptions.draw(this.renderer, () => this.renderer.render(this.scene, this.camera)) : this.renderer.render(this.scene, this.camera));
   }
 
   _applySize() {
