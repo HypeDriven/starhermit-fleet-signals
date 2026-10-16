@@ -14,6 +14,7 @@ import { LESSONS, lessonById } from '../content/tutorial.js';
 import { PRESETS, CATEGORIES, choosePreset, presetTier } from '../render/gfx.js';
 import { pickGfxLocale, gfxStrings, fill } from './gfx-i18n.js';
 import { platformStrings } from './platform-i18n.js';
+import { T, N, pname, lang } from '../i18n/t.js';
 import {
   ACHIEVEMENTS, unlockAchievement, recordBoardEntry, storeSave,
 } from '../platform/save.js';
@@ -31,6 +32,40 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+/** Localized label of a match end reason (engine terminalReason). */
+function reasonText(reason) {
+  return T({ 'fleet-destroyed': N('fleet destroyed'), 'move-limit': N('shot limit reached'), resign: N('resignation') }[reason] || reason || '—');
+}
+
+/**
+ * The engine writes its battle log in English (the log is part of the hashed,
+ * replayable state); translate its fixed patterns for display.
+ */
+function logText(text) {
+  const t = String(text);
+  let m;
+  if (t === 'All fleets deployed. Battle stations.') return T('All fleets deployed. Battle stations.');
+  if ((m = /^(.*) fires on ([A-Z]\d+) — (open water\.|a mine! Extra charge spent\.|hit!|(.*) sunk!)$/.exec(t))) {
+    const name = pname(m[1]);
+    if (m[3] === 'open water.') return T('{name} fires on {cell} — open water.', { name, cell: m[2] });
+    if (m[3] === 'hit!') return T('{name} fires on {cell} — hit!', { name, cell: m[2] });
+    if (m[4] === undefined) return T('{name} fires on {cell} — a mine! Extra charge spent.', { name, cell: m[2] });
+    return T('{name} fires on {cell} — {ship} sunk!', { name, cell: m[2], ship: pname(m[4]) });
+  }
+  if ((m = /^(.*)'s fleet has been destroyed\.$/.exec(t))) return T("{name}'s fleet has been destroyed.", { name: pname(m[1]) });
+  if ((m = /^(.*) strikes their colours\.$/.exec(t))) return T('{name} strikes their colours.', { name: pname(m[1]) });
+  if ((m = /^Match drawn — (.*)\.$/.exec(t))) return T('Match drawn — {reason}.', { reason: reasonText(m[1]) });
+  if ((m = /^(.*) wins — (.*)\.$/.exec(t))) return T('{name} wins — {reason}.', { name: pname(m[1]), reason: reasonText(m[2]) });
+  return t;
+}
+
+/** Localized score-breakdown row label (engine component key + its count). */
+function componentLabel(c) {
+  const n = (/\((\d+)%?\)/.exec(c.label) || [])[1];
+  const label = { win: N('Victory'), hits: N('Hits landed ({n})'), sunk: N('Ships sunk ({n})'), accuracy: N('Accuracy ({n}%)'), efficiency: N('Shots spared ({n})'), invalid: N('Invalid actions ({n})') }[c.key];
+  return label ? T(label, { n }) : c.label;
 }
 
 function el(html) {
@@ -87,14 +122,36 @@ export class App {
     // Launch-token renewal refused: keep playing locally, re-offer sign-in.
     this.platform.onSignedOut = () => {
       this.toast(platformStrings().signedOut, false, 4000);
-      if (this.phase === 'menu' && this.ui.querySelector('[aria-label="Fleet Signals title"]')) this.showTitle();
+      if (this.phase === 'menu' && this.ui.querySelector('[data-screen="title"]')) this.showTitle();
     };
+    // Language changes (Settings › Language or the account preference arriving).
+    document.addEventListener('fs-language', () => this.relocalize());
     if (this.audio.setCaptionSink) {
       this.audio.setCaptionSink((text) => { this.captionLine.textContent = text; });
     }
   }
 
   /* ================= infrastructure ================= */
+
+  /**
+   * The game language changed: static template text is re-translated in place
+   * by the observer in i18n.js; this re-renders text built in code. A match
+   * keeps its state (HUD, tray, rails and objective re-render); a menu screen
+   * re-renders; Settings and Help redraw only what the game owns, so the
+   * shared Language/Sound/Report sections stay mounted.
+   */
+  relocalize() {
+    if (this._gfxRender && this._gfxBox?.isConnected) this._gfxRender();
+    if (this.session && this.ui.querySelector('.game-root')) {
+      const sub = this.ui.querySelector('#hud-sub');
+      if (sub) sub.textContent = this._objectiveSub();
+      if (this.session.state.phase === 'placement') { const o = this.ui.querySelector('#hud-objective'); if (o) o.textContent = T('Deploy your fleet'); }
+      this._updateHud();
+      this._renderTray();
+    } else if (this._screen) {
+      this._screen();
+    }
+  }
 
   persist() { this.saveHooks.persist(this.doc); }
 
@@ -146,6 +203,7 @@ export class App {
   /** Replace the UI layer contents; manages focus restoration. */
   mount(node, { focusSelector = 'button, [tabindex], input, select' } = {}) {
     this.cleanup();
+    this._screen = null;
     this._profileOpen = false;
     this.ui.innerHTML = '';
     this.ui.appendChild(node);
@@ -197,16 +255,16 @@ export class App {
       ? `<div class="menu-row"><button class="ghost" data-act="signin">${esc(ps.signIn)}</button></div>`
       : this.platform.hosted ? `<div class="menu-row"><button class="ghost" data-act="invite">${esc(ps.invite)}</button></div>` : '';
     const node = el(`
-      <div class="screen" role="main" aria-label="Fleet Signals title">
+      <div class="screen" role="main" aria-label="Fleet Signals title" data-screen="title">
         <div class="panel title-panel">
           <img class="title-art" src="./assets/key-art.webp" alt="" aria-hidden="true" onerror="this.remove()">
-          <h1 class="game-title">FLEET SIGNALS</h1>
+          <h1 class="game-title" data-i18n-skip>FLEET SIGNALS</h1>
           <p class="game-subtitle">A captain's holographic chart table. Hide your fleet. Read the water.</p>
           <div class="menu-stack">
             ${resume ? '<button class="primary btn-play" data-act="resume">Resume Match</button>' : ''}
             <button class="primary btn-play" data-act="play">Play</button>
             <div class="menu-row">
-              <button data-act="daily">Daily Signal${dailyDone ? ' ✓' : ''}</button>
+              <button data-act="daily"><span>Daily Signal</span>${dailyDone ? ' ✓' : ''}</button>
               <button data-act="journey">Journey <span class="badge">${journeyDone}/40</span></button>
             </div>
             <div class="menu-row">
@@ -248,7 +306,8 @@ export class App {
       })[act]?.();
     });
     this.mount(node);
-    this.announce('Fleet Signals title screen. Press Play to start a practice match.');
+    this._screen = () => this.showTitle();
+    this.announce(T('Fleet Signals title screen. Press Play to start a practice match.'));
   }
 
   /** Mode setup: rules, duration, players, assists, ranked — before commitment. */
@@ -259,33 +318,33 @@ export class App {
     const fleet = E.FLEETS[c?.fleetId || 'standard'];
     const mech = { ...E.DEFAULT_MECHANICS, ...(c?.mechanics || {}) };
     const fleetCells = fleet.reduce((a, s) => a + s.size, 0);
-    const duration = gridSize <= 6 ? 'Short (about 4 min)' : gridSize <= 8 ? 'Medium (about 8 min)' : 'Long (about 12 min)';
+    const duration = gridSize <= 6 ? T('Short (about 4 min)') : gridSize <= 8 ? T('Medium (about 8 min)') : T('Long (about 12 min)');
     const ranked = mode === 'daily' || mode === 'journey' || mode === 'challenge';
     const mechList = [];
-    if (mech.salvo) mechList.push('Salvo — one shot per surviving ship each turn');
-    if (mech.moveLimit) mechList.push(`Shot limit — ${mech.moveLimit} shots for the whole match`);
-    if (mech.mineCount) mechList.push(`Mines — ${mech.mineCount} hidden hazards per chart (striking one costs an extra shot)`);
-    if (mech.noTouch) mechList.push('Discipline — ships may not touch when placed');
-    if (mech.fog) mechList.push('Fog — sunken ships are not identified');
-    if (!mechList.length) mechList.push('Classic duel — alternate single shots');
+    if (mech.salvo) mechList.push(T('Salvo — one shot per surviving ship each turn'));
+    if (mech.moveLimit) mechList.push(T('Shot limit — {n} shots for the whole match', { n: mech.moveLimit }));
+    if (mech.mineCount) mechList.push(T('Mines — {n} hidden hazards per chart (striking one costs an extra shot)', { n: mech.mineCount }));
+    if (mech.noTouch) mechList.push(T('Discipline — ships may not touch when placed'));
+    if (mech.fog) mechList.push(T('Fog — sunken ships are not identified'));
+    if (!mechList.length) mechList.push(T('Classic duel — alternate single shots'));
 
     const node = el(`
       <div class="screen dim" role="main" aria-label="Match setup">
         <div class="panel">
-          <h2>${esc(mode === 'daily' ? 'Daily Signal — ' + this.platform.utcToday()
-            : c ? c.name : 'Practice Skirmish')}
-            <span class="badge ${ranked ? 'ranked' : ''}">${ranked ? 'Ranked' : 'Unranked'}</span>
+          <h2>${esc(mode === 'daily' ? T('Daily Signal — {date}', { date: this.platform.utcToday() })
+            : c ? T(c.name) : T('Practice Skirmish'))}
+            <span class="badge ${ranked ? 'ranked' : ''}">${ranked ? T('Ranked') : T('Unranked')}</span>
           </h2>
-          ${c?.briefing ? `<p>${esc(c.briefing)}</p>` : '<p>A straight duel against the practice intelligence. Undo and hints are available; nothing here affects ratings.</p>'}
+          ${c?.briefing ? `<p>${esc(T(c.briefing))}</p>` : '<p>A straight duel against the practice intelligence. Undo and hints are available; nothing here affects ratings.</p>'}
           <table class="score-rows" aria-label="Rules summary">
             <tr><td>Chart</td><td>${gridSize}×${gridSize}</td></tr>
-            <tr><td>Fleet</td><td>${fleet.length} ships, ${fleetCells} cells</td></tr>
+            <tr><td>Fleet</td><td>${esc(T('{n} ships, {cells} cells', { n: fleet.length, cells: fleetCells }))}</td></tr>
             <tr><td>Rules</td><td>${esc(mechList.join('; '))}</td></tr>
-            <tr><td>Players</td><td>2 — you vs ${esc(AI_NAMES[c?.aiDifficulty || 'medium'])}</td></tr>
-            ${c?.par ? `<tr><td>Par</td><td>${c.par} shots for a star</td></tr>` : ''}
-            ${c?.goalText ? `<tr><td>Challenge goal</td><td>${esc(c.goalText)}</td></tr>` : ''}
+            <tr><td>Players</td><td>${esc(T('2 — you vs {name}', { name: pname(AI_NAMES[c?.aiDifficulty || 'medium']) }))}</td></tr>
+            ${c?.par ? `<tr><td>Par</td><td>${esc(T('{n} shots for a star', { n: c.par }))}</td></tr>` : ''}
+            ${c?.goalText ? `<tr><td>Challenge goal</td><td>${esc(T(c.goalText))}</td></tr>` : ''}
             <tr><td>Expected duration</td><td>${duration}</td></tr>
-            <tr><td>Seed</td><td><code>${esc(c?.seed || 'random per match')}</code></td></tr>
+            <tr><td>Seed</td><td>${c?.seed ? `<code>${esc(c.seed)}</code>` : esc(T('random per match'))}</td></tr>
           </table>
           ${mode === 'practice' ? `
             <label for="setup-diff">Opponent difficulty</label>
@@ -318,7 +377,12 @@ export class App {
       }
     });
     this.mount(node);
-    this.announce(`Setup for ${c ? c.name : 'practice'}. ${ranked ? 'Ranked.' : 'Unranked.'} Press Launch to begin.`);
+    this._screen = () => {
+      const diff = node.querySelector('#setup-diff')?.value;
+      this.showSetup(mode, content);
+      if (diff) this.ui.querySelector('#setup-diff').value = diff;
+    };
+    this.announce(T(ranked ? 'Setup for {name}. Ranked. Press Launch to begin.' : 'Setup for {name}. Unranked. Press Launch to begin.', { name: c ? T(c.name) : T('practice') }));
   }
 
   showJourney() {
@@ -331,7 +395,7 @@ export class App {
       const stars = rec ? '★'.repeat(rec.stars) + '☆'.repeat(3 - rec.stars) : '';
       return `<button class="stage-cell ${locked ? 'locked' : ''} ${s.mastery ? 'mastery-cell' : ''}"
         data-stage="${s.id}" ${locked ? 'disabled aria-disabled="true"' : ''}
-        aria-label="Stage ${s.index}: ${esc(s.name)}${locked ? ' (locked)' : rec ? `, ${rec.stars} stars` : ''}">
+        aria-label="${esc(locked ? T('Stage {n}: {name} (locked)', { n: s.index, name: T(s.name) }) : rec ? T('Stage {n}: {name}, {stars} stars', { n: s.index, name: T(s.name), stars: rec.stars }) : T('Stage {n}: {name}', { n: s.index, name: T(s.name) }))}">
         <span>${s.index}${s.mastery ? ' ◆' : ''}</span>
         <span class="stage-stars">${stars}</span>
       </button>`;
@@ -355,7 +419,8 @@ export class App {
       if (ev.target.closest('[data-act="back"]')) { this.play('ui-back'); this.showTitle(); }
     });
     this.mount(node);
-    this.announce(`Journey map. ${Object.keys(done).length} of 40 stages complete.`);
+    this._screen = () => this.showJourney();
+    this.announce(T('Journey map. {n} of 40 stages complete.', { n: Object.keys(done).length }));
   }
 
   showChallengeList() {
@@ -363,8 +428,8 @@ export class App {
       const rec = this.doc.challenges.completed[c.id];
       return `<div class="lobby-player">
         <div style="flex:1">
-          <strong>${esc(c.name)}</strong>${rec ? ' <span class="badge">cleared ' + rec.score + '</span>' : ''}<br>
-          <small>${esc(c.description)} Goal: ${esc(c.goalText)}</small>
+          <strong>${esc(T(c.name))}</strong>${rec ? ` <span class="badge">${esc(T('cleared {score}', { score: rec.score }))}</span>` : ''}<br>
+          <small>${esc(T('{description} Goal: {goal}', { description: T(c.description), goal: T(c.goalText) }))}</small>
         </div>
         <button data-ch="${c.id}">Run</button>
       </div>`;
@@ -384,13 +449,14 @@ export class App {
       if (ev.target.closest('[data-act="back"]')) { this.play('ui-back'); this.showTitle(); }
     });
     this.mount(node);
+    this._screen = () => this.showChallengeList();
   }
 
   showLearn() {
     const rows = LESSONS.map((l, i) => {
       const doneStep = this.doc.tutorial.done;
       return `<div class="lobby-player">
-        <div style="flex:1"><strong>${esc(l.title)}</strong><br><small>${esc(l.intro)}</small></div>
+        <div style="flex:1"><strong>${esc(T(l.title))}</strong><br><small>${esc(T(l.intro))}</small></div>
         <button data-lesson="${l.id}">Start</button>
       </div>`;
     }).join('');
@@ -409,6 +475,7 @@ export class App {
       if (ev.target.closest('[data-act="back"]')) { this.play('ui-back'); this.showTitle(); }
     });
     this.mount(node);
+    this._screen = () => this.showLearn();
   }
 
   /* ================= hosted (local table) ================= */
@@ -416,22 +483,22 @@ export class App {
   showLobby() {
     // Local hosted play: 2-4 captains at one table with privacy handover.
     const seats = this.lobbySeats || [
-      { id: 'p1', name: 'Captain One', ready: false },
-      { id: 'p2', name: 'Captain Two', ready: false },
+      { id: 'p1', name: T('Captain {n}', { n: 1 }), ready: false },
+      { id: 'p2', name: T('Captain {n}', { n: 2 }), ready: false },
     ];
     this.lobbySeats = seats;
     const rows = seats.map((s, i) => `
       <div class="lobby-player ${s.ready ? 'ready' : ''}">
         <span class="ready-dot" aria-hidden="true"></span>
-        <input type="text" value="${esc(s.name)}" maxlength="18" data-seat-name="${i}" aria-label="Player ${i + 1} name">
-        <button data-seat-ready="${i}" aria-pressed="${s.ready}">${s.ready ? 'Ready' : 'Not ready'}</button>
-        ${seats.length > 2 ? `<button class="ghost" data-seat-drop="${i}" aria-label="Remove player ${i + 1}">✕</button>` : ''}
+        <input type="text" value="${esc(s.name)}" maxlength="18" data-seat-name="${i}" aria-label="${esc(T('Player {n} name', { n: i + 1 }))}">
+        <button data-seat-ready="${i}" aria-pressed="${s.ready}">${s.ready ? N('Ready') : N('Not ready')}</button>
+        ${seats.length > 2 ? `<button class="ghost" data-seat-drop="${i}" aria-label="${esc(T('Remove player {n}', { n: i + 1 }))}">✕</button>` : ''}
       </div>`).join('');
     const node = el(`
       <div class="screen dim" role="main" aria-label="Hosted table lobby">
         <div class="panel">
           <h2>Hosted Table <span class="badge">Local pass-and-play</span></h2>
-          <p>Two to four captains share this table. The chart is hidden between turns — hand the device over when prompted. Placement and shots are validated by the same authoritative script that runs online sessions (<code>server.js</code>); reconnecting mid-match restores the last snapshot from the title screen.</p>
+          <p>Two to four captains share this table. The chart is hidden between turns — hand the device over when prompted. Placement and shots are validated by the same authoritative script that runs online sessions (server.js); reconnecting mid-match restores the last snapshot from the title screen.</p>
           <div role="list" aria-label="Roster">${rows}</div>
           <div class="menu-row" style="margin-top:12px">
             ${seats.length < 4 ? '<button data-act="add">Add player</button>' : ''}
@@ -461,18 +528,19 @@ export class App {
         // the roster with 'duplicate player id'.
         let n = 1;
         while (seats.some((s) => s.id === 'p' + n)) n += 1;
-        seats.push({ id: 'p' + n, name: 'Captain ' + n, ready: false });
+        seats.push({ id: 'p' + n, name: T('Captain {n}', { n }), ready: false });
         this.showLobby();
       }
       if (act === 'start') {
-        if (!seats.every((s) => s.ready)) { this.toast('Every captain must signal ready.', true); this.play('invalid'); return; }
+        if (!seats.every((s) => s.ready)) { this.toast(T('Every captain must signal ready.'), true); this.play('invalid'); return; }
         this.play('ui-press');
         this.startMatch('hosted', null, { seats });
       }
       if (act === 'back') { this.play('ui-back'); this.showTitle(); }
     });
     this.mount(node);
-    this.announce('Hosted table lobby. Set names, signal ready, and start.');
+    this._screen = () => this.showLobby();
+    this.announce(T('Hosted table lobby. Set names, signal ready, and start.'));
   }
 
   /* ================= profile ================= */
@@ -484,17 +552,17 @@ export class App {
       const unlocked = this.doc.achievements[a.key];
       return `<div class="achievement-row ${unlocked ? '' : 'locked'}">
         <span class="ach-icon" aria-hidden="true">${ACH_ICONS[a.key] || '★'}</span>
-        <div style="flex:1"><strong>${esc(a.name)}</strong><br><small>${esc(a.description)}</small></div>
-        <span>${unlocked ? '✓ ' + esc(String(unlocked).slice(0, 10)) : 'Locked'}</span>
+        <div style="flex:1"><strong>${esc(T(a.name))}</strong><br><small>${esc(T(a.description))}</small></div>
+        <span>${unlocked ? '✓ ' + esc(String(unlocked).slice(0, 10)) : N('Locked')}</span>
       </div>`;
     }).join('');
     const boardRows = this.doc.boards.entries.slice(0, 10).map((b) =>
-      `<tr><td>${esc(b.board)}</td><td>${b.score}</td><td>${esc(b.seed)}</td><td>${esc(String(b.date).slice(0, 10))}</td></tr>`).join('');
+      `<tr><td>${esc(T({ daily: N('Daily'), journey: N('Journey'), challenge: N('Challenge'), practice: N('Practice') }[b.board] || b.board))}</td><td>${b.score}</td><td>${esc(b.seed)}</td><td>${esc(String(b.date).slice(0, 10))}</td></tr>`).join('');
     // Hosted identity + cloud-save mirror status (local play: device-only note).
-    const syncLabels = { loading: 'loading…', saving: 'saving…', synced: 'synced', error: 'sync error — retries with your next save', offline: 'offline' };
+    const syncLabels = { loading: N('loading…'), saving: N('saving…'), synced: N('synced'), error: N('sync error — retries with your next save'), offline: N('offline') };
     const accountRow = this.platform.hosted
       ? `<p class="account-row">Signed in as <strong>${esc(this.platform.accountName || '…')}</strong>
-          <span class="badge">${esc(syncLabels[this.platform.syncStatus] || this.platform.syncStatus)}</span><br>
+          <span class="badge">${esc(T(syncLabels[this.platform.syncStatus] || this.platform.syncStatus))}</span><br>
           <small>Progress mirrors to your StarHermit cloud save; this device keeps an offline copy.</small></p>`
       : `<p class="account-row"><span class="badge">Offline</span> <small>Progress is stored on this device only.</small></p>`;
     const node = el(`
@@ -503,7 +571,7 @@ export class App {
           <h2>Profile ${this.doc.profile.guest ? '<span class="badge">Guest</span>' : ''}</h2>
           ${accountRow}
           <label for="profile-name">Display name</label>
-          <input type="text" id="profile-name" value="${esc(this.doc.profile.name)}" maxlength="18">
+          <input type="text" id="profile-name" value="${esc(pname(this.doc.profile.name))}" maxlength="18">
           <div class="stat-grid" role="list" aria-label="Career statistics">
             <div class="stat-box"><div class="stat-num">${st.sessions}</div><div class="stat-label">Sessions</div></div>
             <div class="stat-box"><div class="stat-num">${st.wins}</div><div class="stat-label">Victories</div></div>
@@ -527,7 +595,7 @@ export class App {
       if (act === 'save-name') {
         this.doc.profile.name = node.querySelector('#profile-name').value.trim().slice(0, 18) || 'Guest Captain';
         this.persist();
-        this.toast('Name saved.');
+        this.toast(T('Name saved.'));
         this.play('ui-press');
       }
       if (act === 'reset') {
@@ -543,6 +611,7 @@ export class App {
     });
     this.mount(node);
     this._profileOpen = true;
+    this._screen = () => this.showProfile();
   }
 
   /* ================= settings ================= */
@@ -554,25 +623,25 @@ export class App {
       <input type="range" id="set-${key}" min="0" max="1" step="0.05" value="${s[key]}">`;
     const toggle = (key, label) => `
       <div class="toggle-row"><input type="checkbox" id="set-${key}" ${s[key] ? 'checked' : ''}><label for="set-${key}">${label}</label></div>`;
-    const themeOpts = THEMES.map((t) => `<option value="${t.id}" ${s.theme === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
+    const themeOpts = THEMES.map((t) => `<option value="${t.id}" ${s.theme === t.id ? 'selected' : ''}>${esc(N(t.name))}</option>`).join('');
     const node = el(`
       <div class="screen dim" role="main" aria-label="Settings">
         <div class="panel wide">
           <h2>Settings</h2>
           <div class="settings-grid">
             <fieldset><legend>Audio</legend>
-              ${slider('music', 'Music')}
-              ${slider('effects', 'Effects')}
-              ${slider('ambience', 'Ambience')}
-              ${slider('voice', 'Voice cues')}
-              ${toggle('muted', 'Mute all audio')}
-              ${toggle('captions', 'Captions for meaningful audio')}
+              ${slider('music', N('Music'))}
+              ${slider('effects', N('Effects'))}
+              ${slider('ambience', N('Ambience'))}
+              ${slider('voice', N('Voice cues'))}
+              ${toggle('muted', N('Mute all audio'))}
+              ${toggle('captions', N('Captions for meaningful audio'))}
             </fieldset>
             <fieldset><legend>Display</legend>
               <label for="set-theme">Visual theme</label>
               <select id="set-theme">${themeOpts}</select>
-              ${toggle('reducedMotion', 'Reduced motion (no camera swoops, shake, or heavy particles)')}
-              ${toggle('highContrast', 'High contrast')}
+              ${toggle('reducedMotion', N('Reduced motion (no camera swoops, shake, or heavy particles)'))}
+              ${toggle('highContrast', N('High contrast'))}
             </fieldset>
             <fieldset><legend>Accessibility</legend>
               <label for="set-palette">Color-vision palette</label>
@@ -582,13 +651,13 @@ export class App {
                 <option value="protanopia" ${s.palette === 'protanopia' ? 'selected' : ''}>Protanopia-safe</option>
                 <option value="tritanopia" ${s.palette === 'tritanopia' ? 'selected' : ''}>Tritanopia-safe</option>
               </select>
-              ${toggle('largerText', 'Larger text')}
-              ${toggle('leftHanded', 'Left-handed controls')}
-              ${toggle('haptics', 'Haptics (vibration)')}
-              ${toggle('holdToConfirm', 'Hold to confirm destructive actions')}
+              ${toggle('largerText', N('Larger text'))}
+              ${toggle('leftHanded', N('Left-handed controls'))}
+              ${toggle('haptics', N('Haptics (vibration)'))}
+              ${toggle('holdToConfirm', N('Hold to confirm destructive actions'))}
             </fieldset>
             <fieldset><legend>Learning</legend>
-              <p>Tutorial progress: ${this.doc.tutorial.done ? 'complete' : 'not finished'}.</p>
+              <p>${N(this.doc.tutorial.done ? 'Tutorial progress: complete.' : 'Tutorial progress: not finished.')}</p>
               <button data-act="replay-tutorial">Replay tutorial</button>
             </fieldset>
             <fieldset class="gfx-section" id="gfx-section" data-gfx-section></fieldset>
@@ -630,9 +699,17 @@ export class App {
   _wireGraphicsSection(box) {
     const s = this.doc.settings;
     if (!s.graphics || typeof s.graphics !== 'object') s.graphics = {};
-    const T = gfxStrings(pickGfxLocale(globalThis.navigator?.language));
-    const tierName = (t) => T.tier[t] || t;
+    // The game redraws only its own inner box; game-options.js mounts the shared
+    // frame-rate, Language, Sound and Report sections in this fieldset after it.
+    const legend = document.createElement('legend');
+    const inner = document.createElement('div');
+    inner.className = 'gfx-inner';
+    box.replaceChildren(legend, inner);
+    let G = null;
+    const tierName = (t) => G.tier[t] || t;
     const render = () => {
+      G = gfxStrings(pickGfxLocale(lang()));
+      const T = G;
       const g = s.graphics;
       const info = this.scene.graphicsInfo();
       const active = info.resolved.preset;
@@ -647,8 +724,8 @@ export class App {
             ${tiers.map((t) => `<option value="${t}" ${g[cat] === t ? 'selected' : ''}>${esc(tierName(t))}</option>`).join('')}
           </select>
         </div>`).join('');
-      box.innerHTML = `
-        <legend>${esc(T.graphics)}</legend>
+      legend.textContent = T.graphics;
+      inner.innerHTML = `
         <div class="gfx-top">
           <div>
             <label for="gfx-preset">${esc(T.quality)}</label>
@@ -708,6 +785,8 @@ export class App {
       summary();
     });
     render();
+    this._gfxRender = render;
+    this._gfxBox = box;
     // the post chain is (re)built on the next frame; refresh the summary/fps line while open
     const timer = setInterval(() => {
       if (!box.isConnected) { clearInterval(timer); return; }
@@ -891,8 +970,8 @@ export class App {
     if (!this.lesson) return;
     const step = this.lesson.def.steps[this.lesson.stepIdx];
     if (!step) return;
-    this.toast(step.text, false, 6500);
-    this.announce(this.lesson.def.title + '. ' + step.text);
+    this.toast(T(step.text), false, 6500);
+    this.announce(T(this.lesson.def.title) + '. ' + T(step.text));
   }
 
   _lessonCheck(events) {
@@ -907,7 +986,7 @@ export class App {
     if (hit) {
       const lessonId = this.lesson.def.id;
       this.play('lesson-done');
-      this.toast('Lesson objective complete!', false, 3000);
+      this.toast(T('Lesson objective complete!'), false, 3000);
       this.lesson = null;
       const idx = LESSONS.findIndex((l) => l.id === lessonId);
       this.doc.tutorial.step = Math.max(this.doc.tutorial.step, (idx >= 0 ? idx : 0) + 1);
@@ -955,13 +1034,13 @@ export class App {
   _objectiveSub() {
     const m = this.session?.state.mechanics || {};
     const bits = [];
-    if (this.mode === 'daily') bits.push('Daily ' + this.platform.utcToday());
-    if (this.content?.name) bits.push(this.content.name);
-    if (m.salvo) bits.push('salvo');
-    if (m.moveLimit) bits.push(m.moveLimit + ' shots');
-    if (m.mineCount) bits.push('mines');
-    if (m.fog) bits.push('fog');
-    return bits.join(' · ') || 'Sink the opposing fleet';
+    if (this.mode === 'daily') bits.push(T('Daily {date}', { date: this.platform.utcToday() }));
+    if (this.content?.name) bits.push(T(this.content.name));
+    if (m.salvo) bits.push(T('salvo'));
+    if (m.moveLimit) bits.push(T('{n} shots', { n: m.moveLimit }));
+    if (m.mineCount) bits.push(T('mines'));
+    if (m.fog) bits.push(T('fog'));
+    return bits.join(' · ') || T('Sink the opposing fleet');
   }
 
   _updateHud() {
@@ -971,7 +1050,7 @@ export class App {
     const turnEl = this.ui.querySelector('#hud-turn');
     if (!objEl || !turnEl) return;
     if (st.phase === 'placement') {
-      objEl.textContent = 'Deploy your fleet';
+      objEl.textContent = T('Deploy your fleet');
     } else if (st.phase === 'battle') {
       const viewer = this._viewer();
       const me = st.players.find((p) => p.id === viewer);
@@ -980,15 +1059,15 @@ export class App {
       const fleetTotal = foes.reduce((a, f) => a + f.ships.length, 0);
       const cur = st.players[st.currentPlayerIndex];
       const mine = cur.id === viewer;
-      objEl.textContent = `Enemy fleet: ${sunkTotal}/${fleetTotal} sunk`;
-      turnEl.textContent = st.phase === 'battle' ? (mine ? 'Your turn' : `${cur.name}'s turn`) : '';
+      objEl.textContent = T('Enemy fleet: {sunk}/{total} sunk', { sunk: sunkTotal, total: fleetTotal });
+      turnEl.textContent = st.phase === 'battle' ? (mine ? T('Your turn') : T("{name}'s turn", { name: pname(cur.name) })) : '';
       turnEl.className = 'hud-turn ' + (mine ? 'yours' : 'theirs');
       if (st.mechanics.moveLimit > 0 && me) {
         const left = Math.max(0, st.mechanics.moveLimit - me.shotsUsed);
-        turnEl.textContent += ` · ${left} shots`;
+        turnEl.textContent += ' · ' + T('{n} shots', { n: left });
       }
     } else if (st.phase === 'finished') {
-      objEl.textContent = 'Engagement concluded';
+      objEl.textContent = T('Engagement concluded');
     }
     this._renderRails();
   }
@@ -1002,17 +1081,17 @@ export class App {
     const me = st.players.find((p) => p.id === viewer);
     const rows = st.players.map((p) => {
       const isMe = p.id === viewer;
-      const label = isMe ? 'Your fleet' : p.name;
+      const label = isMe ? T('Your fleet') : pname(p.name);
       const ships = isMe
-        ? p.ships.map((s) => `<div class="fleet-row ${s.sunk ? 'sunk' : ''}"><span>${esc(s.name)}</span><span>${'●'.repeat(s.hits)}${'○'.repeat(s.size - s.hits)}</span></div>`).join('')
+        ? p.ships.map((s) => `<div class="fleet-row ${s.sunk ? 'sunk' : ''}"><span>${esc(pname(s.name))}</span><span>${'●'.repeat(s.hits)}${'○'.repeat(s.size - s.hits)}</span></div>`).join('')
         : `<div class="fleet-row"><span>Ships sunk</span><span>${p.ships.filter((s) => s.sunk).length}/${p.ships.length}</span></div>
            <div class="fleet-row"><span>Your shots</span><span>${me?.shotsUsed ?? 0}</span></div>
            <div class="fleet-row"><span>Accuracy</span><span>${me && me.shotsUsed ? Math.round((me.hitsLanded / me.shotsUsed) * 100) : 0}%</span></div>`;
-      return `<h3>${esc(label)}${p.alive ? '' : ' — eliminated'}</h3>${ships}`;
+      return `<h3>${esc(p.alive ? label : T('{name} — eliminated', { name: label }))}</h3>${ships}`;
     }).join('');
     left.innerHTML = rows;
     const items = st.log.slice(-12).map((l, i, arr) =>
-      `<li class="${i === arr.length - 1 ? 'latest' : ''}">${esc(l.text)}</li>`).join('');
+      `<li class="${i === arr.length - 1 ? 'latest' : ''}">${esc(logText(l.text))}</li>`).join('');
     logEl.innerHTML = items;
   }
 
@@ -1036,7 +1115,7 @@ export class App {
     this.scene.setInteractive('main');
     this._renderTray();
     this._updateHud();
-    this.announce('Deployment phase. Place every ship, then confirm.');
+    this.announce(T('Deployment phase. Place every ship, then confirm.'));
   }
 
   _nextPlacementSeat() {
@@ -1113,7 +1192,7 @@ export class App {
     const cells = this._shipCellsFor(x, y, pl.dir, def.size);
     if (!this._placementCandidateValid(def.id, cells)) {
       this.play('invalid');
-      this.toast('Illegal position — ships must stay on the chart, clear of mines, other ships' + (st.mechanics.noTouch ? ', and may not touch.' : '.'), true);
+      this.toast(st.mechanics.noTouch ? T('Illegal position — ships must stay on the chart, clear of mines, other ships, and may not touch.') : T('Illegal position — ships must stay on the chart, clear of mines, other ships.'), true);
       return;
     }
     pl.placements.set(def.id, { shipId: def.id, x, y, dir: pl.dir });
@@ -1141,7 +1220,7 @@ export class App {
     const st = this.session.state;
     const pl = this.placement;
     if (pl.placements.size !== st.fleet.length) {
-      this.toast(`Deploy all ${st.fleet.length} ships first.`, true);
+      this.toast(T('Deploy all {n} ships first.', { n: st.fleet.length }), true);
       this.play('invalid');
       return;
     }
@@ -1155,14 +1234,14 @@ export class App {
       this._afterPlacementCommand(events);
     } catch (err) {
       this.play('invalid');
-      this.toast('Placement rejected: ' + err.message, true);
+      this.toast(T('Placement rejected: {reason}', { reason: err.message }), true);
     }
   }
 
   _lessonCheckPlacementDone() {
     if (this.lesson && this.lesson.def.steps[this.lesson.stepIdx]?.waitFor === 'place-all') {
       this.play('lesson-done');
-      this.toast('Fleet deployed. Objective complete!', false, 3000);
+      this.toast(T('Fleet deployed. Objective complete!'), false, 3000);
       this.lesson = null;
     }
   }
@@ -1259,7 +1338,7 @@ export class App {
     const cur = st.players[st.currentPlayerIndex];
     if (cur.id === viewer) {
       this.play('turn');
-      this.announce('Your turn. Select a coordinate on the target chart.');
+      this.announce(T('Your turn. Select a coordinate on the target chart.'));
     }
   }
 
@@ -1311,13 +1390,13 @@ export class App {
 
   _explainInvalid(err) {
     const map = {
-      'not-your-turn': 'Hold fire — it is not your turn.',
-      'cell-already-targeted': 'Already fired there. Pick a fresh coordinate.',
-      'cell-out-of-bounds': 'That coordinate is off the chart.',
-      'target-not-alive': 'That fleet is already destroyed.',
-      'phase': 'Not possible in the current phase.',
+      'not-your-turn': N('Hold fire — it is not your turn.'),
+      'cell-already-targeted': N('Already fired there. Pick a fresh coordinate.'),
+      'cell-out-of-bounds': N('That coordinate is off the chart.'),
+      'target-not-alive': N('That fleet is already destroyed.'),
+      'phase': N('Not possible in the current phase.'),
     };
-    return map[err.code] || ('Illegal action: ' + err.message);
+    return map[err.code] ? T(map[err.code]) : T('Illegal action: {reason}', { reason: err.message });
   }
 
   _annotate(cell) {
@@ -1334,7 +1413,9 @@ export class App {
       this.play('ui-press');
       this._lessonCheck(events);
       this._renderTray();
-      this.announce(next ? `Cell ${cellName(cell, st.gridSize)} marked ${next}.` : `Cell ${cellName(cell, st.gridSize)} note cleared.`);
+      this.announce(next === 'flag' ? T('Cell {cell} flagged.', { cell: cellName(cell, st.gridSize) })
+        : next ? T('Cell {cell} marked unknown.', { cell: cellName(cell, st.gridSize) })
+          : T('Cell {cell} note cleared.', { cell: cellName(cell, st.gridSize) }));
     } catch (err) {
       this.play('invalid');
     }
@@ -1386,15 +1467,14 @@ export class App {
     const st = this.session.state;
     for (const ev of events) {
       if (ev.type === 'shot') {
-        const name = cellName(ev.cell, st.gridSize);
-        const whose = ev.by === viewer ? 'You fire at' : `Incoming fire at`;
-        const what = ev.result === 'miss' ? 'open water'
-          : ev.result === 'mine' ? 'a mine! An extra shot is spent'
-          : ev.result === 'sunk' ? `${ev.shipName || 'an enemy ship'} is sunk`
-          : 'a hit';
-        this.announce(`${whose} ${name} — ${what}.`, ev.result === 'sunk');
+        const cell = cellName(ev.cell, st.gridSize);
+        const what = ev.result === 'miss' ? T('open water')
+          : ev.result === 'mine' ? T('a mine! An extra shot is spent')
+          : ev.result === 'sunk' ? T('{ship} is sunk', { ship: ev.shipName ? pname(ev.shipName) : T('an enemy ship') })
+          : T('a hit');
+        this.announce(T(ev.by === viewer ? 'You fire at {cell} — {what}.' : 'Incoming fire at {cell} — {what}.', { cell, what }), ev.result === 'sunk');
       } else if (ev.type === 'eliminated') {
-        this.announce('A fleet has been destroyed.', true);
+        this.announce(T('A fleet has been destroyed.'), true);
       } else if (ev.type === 'finish') {
         // handled by results screen
       }
@@ -1487,7 +1567,7 @@ export class App {
     if (unlocked.length) {
       for (const key of unlocked) {
         const meta = ACHIEVEMENTS.find((a) => a.key === key);
-        this.toast(`Achievement unlocked: ${meta?.name || key}`, false, 4200);
+        this.toast(T('Achievement unlocked: {name}', { name: meta ? T(meta.name) : key }), false, 4200);
       }
       this.play('achievement');
     }
@@ -1521,33 +1601,33 @@ export class App {
     const { res, stars, viewer } = this.lastResult;
     const st = this.session.state;
     const rows = res.components.map((c) =>
-      `<tr><td>${esc(c.label)}</td><td>${c.points > 0 ? '+' : ''}${c.points}</td></tr>`).join('');
+      `<tr><td>${esc(componentLabel(c))}</td><td>${c.points > 0 ? '+' : ''}${c.points}</td></tr>`).join('');
     const isHot = !!this.hotseat;
     const winnerName = st.winner ? st.players.find((p) => p.id === st.winner)?.name : null;
-    const headline = st.winner === null ? 'Draw'
-      : isHot ? `${winnerName} wins`
-      : res.won ? 'Victory' : 'Defeat';
+    const headline = st.winner === null ? T('Draw')
+      : isHot ? T('{name} wins', { name: pname(winnerName) })
+      : res.won ? T('Victory') : T('Defeat');
     const cls = st.winner === null ? '' : (isHot ? 'win' : res.won ? 'win' : 'loss');
     this.play(res.won || (isHot && st.winner) ? 'victory' : 'defeat');
-    this.announce(`${headline}. Final score ${res.total}.`, true);
+    this.announce(T('{headline}. Final score {n}.', { headline, n: res.total }), true);
 
     const nextStage = this.mode === 'journey' && this.content
       ? STAGES[STAGES.findIndex((s) => s.id === this.content.id) + 1] : null;
     const challengeNote = this.mode === 'challenge'
-      ? `<p>${this._challengePassed(res) ? '✓ Challenge goal met.' : '✗ Challenge goal missed: ' + esc(this.content.goalText)}</p>` : '';
+      ? `<p>${this._challengePassed(res) ? esc(T('✓ Challenge goal met.')) : esc(T('✗ Challenge goal missed: {goal}', { goal: T(this.content.goalText) }))}</p>` : '';
     const art = cls === 'win' ? 'results-win' : 'results-lose';
     const o = this.overlay(`
       <div class="panel" role="document" aria-label="Results">
         <img class="results-art" src="./assets/${art}.webp" alt="" aria-hidden="true" onerror="this.remove()">
         <h2 class="result-headline ${cls}">${esc(headline)}</h2>
-        ${this.mode === 'journey' ? `<div class="stars" aria-label="${stars} of 3 stars">${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}</div>` : ''}
+        ${this.mode === 'journey' ? `<div class="stars" aria-label="${esc(T('{n} of 3 stars', { n: stars }))}">${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}</div>` : ''}
         ${challengeNote}
         <table class="score-rows" aria-label="Score breakdown">
           ${rows}
           <tr class="total"><td>Total</td><td>${res.total}</td></tr>
         </table>
         <p class="lb-line" data-lb hidden></p>
-        <p><small>Reason: ${esc(st.terminalReason || '—')} · Seed: <code>${esc(st.seed)}</code> · Rules v${E.RULES_VERSION} · Time ${Math.round(this.session.elapsedMs() / 1000)}s</small></p>
+        <p><small>${esc(T('Reason: {reason}', { reason: reasonText(st.terminalReason) }))} · ${esc(T('Seed:'))} <code>${esc(st.seed)}</code> · ${esc(T('Rules v{v} · Time {s}s', { v: E.RULES_VERSION, s: Math.round(this.session.elapsedMs() / 1000) }))}</small></p>
         <div class="menu-row">
           <button class="primary" data-act="retry">Retry</button>
           ${nextStage ? '<button data-act="next">Next stage</button>' : ''}
@@ -1617,7 +1697,7 @@ export class App {
   /* ---------------- hot-seat handover ---------------- */
 
   _handover(forPlayerId, ready) {
-    const name = this.session.state.players.find((p) => p.id === forPlayerId)?.name || 'next captain';
+    const name = pname(this.session.state.players.find((p) => p.id === forPlayerId)?.name || T('next captain'));
     this.scene.setInteractive(null);
     if (this.hotseat) this.hotseat.currentViewer = forPlayerId;
     this.inputLocked = true;
@@ -1625,8 +1705,8 @@ export class App {
     const o = this.overlay(`
       <div class="panel" style="text-align:center">
         <h2>Pass the chart</h2>
-        <p>Hand the device to <strong>${esc(name)}</strong>. The fleet positions are secret — no peeking.</p>
-        <button class="primary" data-act="ready">I am ${esc(name)} — ready</button>
+        <p>${T('Hand the device to {name}. The fleet positions are secret — no peeking.', { name: `<strong>${esc(name)}</strong>` })}</p>
+        <button class="primary" data-act="ready">${esc(T('I am {name} — ready', { name }))}</button>
       </div>`);
     o.addEventListener('click', (ev) => {
       if (!ev.target.closest('[data-act="ready"]')) return;
@@ -1653,7 +1733,7 @@ export class App {
         const placed = pl.placements.has(f.id);
         const sel = pl.selectedShipId === f.id;
         return `<button class="ship-chip ${placed ? 'placed' : ''} ${sel ? 'selected' : ''}" data-ship="${f.id}"
-          aria-pressed="${sel}">${esc(f.name)} <span class="pips">${'▮'.repeat(f.size)}</span></button>`;
+          aria-pressed="${sel}">${esc(pname(f.name))} <span class="pips">${'▮'.repeat(f.size)}</span></button>`;
       }).join('');
       html = `
         <div class="ship-list">${chips}</div>
@@ -1667,12 +1747,12 @@ export class App {
         const fires = E.listLegalActions(st, viewer).filter((a) => a.type === 'fire');
         targetPicker = fires.map((f) => {
           const p = st.players.find((q) => q.id === f.targetId);
-          return `<button data-target="${f.targetId}" aria-pressed="${this.hotTarget === f.targetId}">${esc(p.name)}</button>`;
+          return `<button data-target="${f.targetId}" aria-pressed="${this.hotTarget === f.targetId}">${esc(pname(p.name))}</button>`;
         }).join('');
       }
       html = `
         ${targetPicker}
-        <button class="primary" data-tact="fire" ${!myTurn || !sel ? 'disabled' : ''}>Fire${sel ? ' ' + sel : ''}</button>
+        <button class="primary" data-tact="fire" ${!myTurn || !sel ? 'disabled' : ''}><span>Fire</span>${sel ? ' ' + sel : ''}</button>
         <button data-tact="note" aria-pressed="${this.annotateMode}" ${!myTurn ? 'disabled' : ''}>✎ Note (N)</button>
         ${this.session.assists.hints ? `<button data-tact="hint" ${!myTurn ? 'disabled' : ''}>Hint (H)</button>` : ''}
         ${this.session.canUndo() ? '<button data-tact="undo">Undo (U)</button>' : ''}
@@ -1736,30 +1816,30 @@ export class App {
       st.gridSize, st.fleet, st.mechanics, me.mines,
       makeRng('draft-' + Date.now() + '-' + Math.random()),
     );
-    if (!placements) { this.play('invalid'); this.toast('No legal layout found — try manual placement.', true); return; }
+    if (!placements) { this.play('invalid'); this.toast(T('No legal layout found — try manual placement.'), true); return; }
     this.placement.placements = new Map(placements.map((p) => [p.shipId, p]));
     this.placement.selectedShipId = null;
     this.scene.showDraftPlacements(st.fleet, this.placement.placements, st.gridSize);
     this.play('place');
     this._renderTray();
-    this.announce('Draft layout ready. Confirm deployment, or tap a ship to pick it up and adjust.');
+    this.announce(T('Draft layout ready. Confirm deployment, or tap a ship to pick it up and adjust.'));
   }
 
   _showHint() {
     const viewer = this._viewer();
     const hint = this.session.hint(viewer);
-    if (!hint) { this.toast('No hint available right now.', true); return; }
+    if (!hint) { this.toast(T('No hint available right now.'), true); return; }
     this.selectedCell = hint.cell;
     this.cursorCell = hint.cell;
     this.scene.setCursor('main', hint.cell, true);
     this._renderTray();
-    this.toast(`Signal analysis suggests ${cellName(hint.cell, this.session.state.gridSize)}.`, false, 3000);
-    this.announce(`Hint: try ${cellName(hint.cell, this.session.state.gridSize)}.`);
+    this.toast(T('Signal analysis suggests {cell}.', { cell: cellName(hint.cell, this.session.state.gridSize) }), false, 3000);
+    this.announce(T('Hint: try {cell}.', { cell: cellName(hint.cell, this.session.state.gridSize) }));
     this.play('hint');
   }
 
   _undo() {
-    if (!this.session.canUndo()) { this.toast('Nothing to undo.', true); this.play('invalid'); return; }
+    if (!this.session.canUndo()) { this.toast(T('Nothing to undo.'), true); this.play('invalid'); return; }
     // undoStack snapshots are taken before each human command, so one pop
     // reverts the last human shot and any AI reply that followed it.
     this.session.undo();
@@ -1769,7 +1849,7 @@ export class App {
     this._renderTray();
     this._updateHud();
     this.play('ui-back');
-    this.announce('Last exchange undone.');
+    this.announce(T('Last exchange undone.'));
     this._saveResume();
   }
 
@@ -1890,7 +1970,7 @@ export class App {
       if (!gp) return;
       if (!this.gamepadState.seen) {
         this.gamepadState.seen = true;
-        this.toast('Gamepad connected — stick aims, A confirms, B cancels.');
+        this.toast(T('Gamepad connected — stick aims, A confirms, B cancels.'));
       }
       if (!this.session || this.inputLocked || this.paused) return;
       if (this.phase !== 'battle' && this.phase !== 'placement') return;
@@ -1995,7 +2075,7 @@ export class App {
       if (this.session.state.phase === 'placement') this._beginPlacement();
       else if (this.session.state.phase === 'battle') this._beginBattle();
       else { this.showTitle(); return; }
-      this.announce('Match restored from the last safe snapshot.');
+      this.announce(T('Match restored from the last safe snapshot.'));
     } catch (err) {
       this._clearResume();
       this.showTitle();

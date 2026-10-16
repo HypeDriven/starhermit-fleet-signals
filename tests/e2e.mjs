@@ -41,6 +41,9 @@ const MIME = {
 const browserNoise = /GL Driver Message|GPU stall due to ReadPixels|Automatic fallback to software WebGL|EnableWebGLDeveloperExtensions/i;
 
 const apiLog = [];
+// Platform state the Language pass reads back (server-side mocks).
+const mock = { language: 'en', settings: {}, reports: [] };
+const body = (req) => new Promise((resolve) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => resolve(b)); });
 const server = http.createServer(async (req, res) => {
   try {
     const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
@@ -48,11 +51,14 @@ const server = http.createServer(async (req, res) => {
       apiLog.push(`${req.method} ${path}`);
       const json = (b, st = 200) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
       if (path.endsWith('/profile')) return json({ username: 'raw_name', nickname: 'Salty Admiral' });
-      if (path.endsWith('/settings') && req.method === 'GET') return json({ settings: { music: 0.3 } });
+      if (path === '/api/v1/me/language') return json({ preferredLanguage: mock.language });
+      if (path.endsWith('/settings') && req.method === 'GET') return json({ settings: { music: 0.3, ...mock.settings } });
       if (path.endsWith('/settings')) return json({ settings: {} });
+      if (/\/settings\/[^/]+$/.test(path) && req.method === 'PUT') { mock.settings[path.split('/').pop()] = JSON.parse(await body(req)).value; return json({}); }
+      if (/\/reports$/.test(path) && req.method === 'POST') { mock.reports.push(JSON.parse(await body(req))); return json({ id: 'r1', kind: 'bug', status: 'open', createdAt: new Date().toISOString() }, 201); }
       if (path.endsWith('/controls')) return json({ actions: [{ action: 'rotate', codes: ['KeyQ'] }] });
       if (path.endsWith('/cloud-saves/game:fleet-test/info')) return json({ exists: false });
-      if (path.endsWith('/cloud-saves/game:fleet-test')) return json({});
+      if (path.endsWith('/cloud-saves/game:fleet-test')) return json(req.method === 'PUT' ? { etag: '"v' + apiLog.length + '"' } : {});
       return json({ error: 'not found' }, 404);
     }
     const file = normalize(join(ROOT, path === '/' ? '/index.html' : path));
@@ -362,11 +368,125 @@ async function runHostedPass() {
   if (errors.length) throw new Error('[hosted] page errors:\n' + errors.join('\n'));
 }
 
+/**
+ * Language: with the StarHermit preferred language fr-CA, Automatic resolves
+ * to fr-CA; choosing Italian in Settings re-renders in place and saves
+ * ui.language; Report a problem posts a bug report; German fits the viewport;
+ * a match keeps its state when the language changes from the pause menu.
+ */
+async function runLanguagePass({ name, viewport, hasTouch }) {
+  const context = await browser.newContext({ viewport, hasTouch });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('console', (m) => {
+    if ((m.type() === 'error' || m.type() === 'warning') && !browserNoise.test(m.text())) errors.push(`console ${m.type()}: ${m.text()}`);
+  });
+  const SHOT = (s) => `${process.env.SHOT_DIR || '/tmp'}/fleet-signals-e2e-${s}-${name}.png`;
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const token = 'h.' + b64u({ sub: 'cap-1234567', game_scope: 'fleet-test', exp: Math.floor(Date.now() / 1000) + 3600 }) + '.s';
+  const fits = () => page.evaluate(() => {
+    if (document.documentElement.scrollWidth > window.innerWidth + 1) return 'page scrolls sideways';
+    const bad = [...document.querySelectorAll('#ui button, #ui h2, #ui h3, #ui label, #ui legend, #ui p, #ui td')].find((el) => {
+      const r = el.getBoundingClientRect();
+      if (!r.width || el.closest('.game-options-controls')) return false;
+      const rail = el.closest('.rail');
+      if (rail && !rail.classList.contains('open') && getComputedStyle(rail).transform !== 'none') return false; // closed mobile drawer
+      const scroller = el.closest('.panel, .screen, .overlay, .tray');
+      const box = scroller ? scroller.getBoundingClientRect() : { left: 0, right: window.innerWidth };
+      return r.right > Math.min(window.innerWidth, box.right) + 1 || r.left < Math.max(0, box.left) - 1;
+    });
+    return bad ? 'cut off: ' + bad.textContent.trim().slice(0, 80) : '';
+  });
+  mock.language = 'fr-CA'; mock.settings = {}; mock.reports = [];
+  try {
+    await page.goto('about:blank');
+    await page.goto(`${BASE}/#game_token=${token}`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.documentElement.lang === 'fr-CA', null, { timeout: 15000 });
+    await page.waitForFunction(() => document.querySelector('[data-act="play"]')?.textContent === 'Jouer');
+    await page.click('[data-act="settings"]');
+    const choice = page.locator('[data-game-language="choice"]');
+    await choice.scrollIntoViewIfNeeded();
+    const auto = await choice.locator('option').first().textContent();
+    if (!/^Automatique — Français \(Canada\)$/.test(auto)) throw new Error('Automatic label not resolved: ' + auto);
+    const select = await choice.elementHandle();
+    await choice.selectOption('it-IT');
+    await page.waitForFunction(() => document.documentElement.lang === 'it-IT');
+    await page.waitForFunction(() => /Salvato/.test(document.querySelector('[data-game-language="status"]').textContent));
+    if (mock.settings['ui.language']?.choice !== 'it-IT') throw new Error('ui.language not saved: ' + JSON.stringify(mock.settings));
+    const legends = await page.evaluate(() => [...document.querySelectorAll('#ui legend, #ui h2')].map((n) => n.textContent).join('|'));
+    if (!/Impostazioni/.test(legends) || !/Schermo/.test(legends) || !/Grafica/.test(legends)) throw new Error('settings not re-rendered: ' + legends);
+    if (!await select.evaluate((n) => n.isConnected)) throw new Error('shared Language select was redrawn');
+    await page.locator('[data-game-report="title"]').scrollIntoViewIfNeeded();
+    await page.fill('[data-game-report="title"]', 'Test report');
+    await page.click('[data-game-report="send"]');
+    await page.waitForFunction(() => /Grazie/.test(document.querySelector('[data-game-report="status"]').textContent));
+    if (mock.reports[0]?.kind !== 'bug') throw new Error('report not posted: ' + JSON.stringify(mock.reports));
+    await page.screenshot({ path: SHOT('language') });
+    await choice.selectOption('de-DE');
+    await page.waitForFunction(() => document.documentElement.lang === 'de-DE');
+    let fit = await fits();
+    if (fit) throw new Error('German settings: ' + fit);
+    await page.screenshot({ path: SHOT('language-de-settings'), fullPage: true });
+    await page.click('[data-act="done"]');
+    await page.waitForFunction(() => document.querySelector('[data-act="play"]')?.textContent === 'Spielen');
+    fit = await fits();
+    if (fit) throw new Error('German title: ' + fit);
+    await page.screenshot({ path: SHOT('language-de-title') });
+    // A match keeps its state across a language change made from the pause menu.
+    await page.evaluate(() => { window.__fleet.app.aiDelay = () => 30; });
+    await page.click('[data-act="play"]');
+    await page.click('[data-act="launch"]');
+    await page.click('[data-tact="auto"]');
+    if (!/Aufstellung bestätigen/.test(await page.textContent('[data-tact="confirm"]'))) throw new Error('tray not in German');
+    await page.click('[data-tact="confirm"]');
+    await page.waitForFunction(() => window.__fleet.app.session?.state.phase === 'battle' && window.__fleet.app.phase === 'battle', null, { timeout: 20000 });
+    fit = await fits();
+    if (fit) throw new Error('German HUD: ' + fit);
+    await page.screenshot({ path: SHOT('language-de-hud') });
+    if (hasTouch) { // the fleet drawer, opened, must fit too
+      await page.click('[data-hud="left"]');
+      await page.waitForTimeout(400);
+      fit = await fits();
+      if (fit) throw new Error('German fleet drawer: ' + fit);
+      await page.screenshot({ path: SHOT('language-de-drawer') });
+      await page.click('[data-hud="left"]');
+    }
+    await page.evaluate(() => { window.__sameMatch = window.__fleet.app.session; });
+    await page.click('[data-hud="pause"]');
+    await page.click('[data-act="settings"]');
+    await choice.scrollIntoViewIfNeeded();
+    await choice.selectOption('fr-FR');
+    await page.waitForFunction(() => document.documentElement.lang === 'fr-FR');
+    await page.click('[data-act="done"]');
+    await page.waitForFunction(() => document.querySelector('[data-act="resume"]')?.textContent === 'Reprendre');
+    await page.click('[data-act="resume"]');
+    await page.waitForFunction(() => /Flotte ennemie/.test(document.querySelector('#hud-objective')?.textContent || ''));
+    if (!/Tirer/.test(await page.textContent('[data-tact="fire"]'))) throw new Error('tray not re-rendered');
+    if (await page.getAttribute('[data-hud="pause"]', 'aria-label') !== 'Pause') throw new Error('static label');
+    const same = await page.evaluate(() => window.__sameMatch === window.__fleet.app.session && window.__fleet.app.session.state.phase !== 'placement');
+    if (!same) throw new Error('the match restarted on a language change');
+    await page.click('[data-hud="pause"]');
+    await page.click('[data-act="settings"]');
+    await choice.scrollIntoViewIfNeeded();
+    await choice.selectOption('auto');
+    await page.waitForFunction(() => document.documentElement.lang === 'fr-CA');
+    if (mock.settings['ui.language']?.choice !== 'auto') throw new Error('auto not saved');
+    console.log(`ok - [${name}] Language: Automatic follows the StarHermit preferred language; live switch mid-match; ui.language; report a problem`);
+  } finally {
+    mock.language = 'en';
+    await context.close();
+  }
+  if (errors.length) throw new Error(`[${name} language] page errors:\n` + errors.join('\n'));
+}
+
 try {
   await runPass({ name: 'desktop', viewport: { width: 1280, height: 800 }, hasTouch: false });
   await runPass({ name: 'mobile', viewport: { width: 390, height: 844 }, hasTouch: true });
   await runHostedPass();
   await runSignedInPass();
+  await runLanguagePass({ name: 'desktop', viewport: { width: 1280, height: 800 }, hasTouch: false });
+  await runLanguagePass({ name: 'mobile', viewport: { width: 390, height: 844 }, hasTouch: true });
   console.log('\nE2E PASS — full Fleet Signals playthrough clean on desktop + mobile + hosted roster, no page errors');
 } finally {
   await browser.close();

@@ -16,19 +16,23 @@
 <script src="ui-scale.js"></script>
 <script src="browser-guard.js"></script>
 <script src="starhermit-sdk.js"></script>
+<script src="sh-language.js"></script>
+<script src="src/i18n/strings.js"></script>
+<script src="src/i18n/strings-content.js"></script>
+<script src="src/i18n/i18n.js"></script>
 </head>
 <body>
   <!-- Three.js canvas fills the game region but is never the only UI. -->
   <canvas id="scene" aria-hidden="true"></canvas>
   <!-- Projected DOM label layer (aligned with 3D targets each frame). -->
-  <div id="label-layer" aria-hidden="true"></div>
+  <div id="label-layer" aria-hidden="true" data-i18n-skip></div>
   <!-- Semantic HTML interface layer. -->
   <div id="ui"></div>
   <!-- Accessibility live regions -->
   <div id="live-polite" class="sr-only" role="status" aria-live="polite"></div>
   <div id="live-assertive" class="sr-only" role="alert" aria-live="assertive"></div>
   <div id="caption-line" class="sr-only" aria-live="polite"></div>
-  <noscript>
+  <noscript data-i18n-skip>
     <div style="padding:2rem;font-family:sans-serif;color:#fff;background:#0a1626;min-height:100vh">
       <h1>Fleet Signals</h1>
       <p>Fleet Signals requires JavaScript. Enable JavaScript and reload to take command of your fleet.</p>

@@ -1,5 +1,5 @@
 // Fleet Signals — localized strings for the StarHermit account surface (sign-in,
-// invite link, sign-out notice, leaderboard line), picked from navigator.language like the
+// invite link, sign-out notice, leaderboard line), picked from the game language (src/i18n) like the
 // Graphics panel (exact match, then language family, then en-US).
 import { pickGfxLocale as pickLocale } from './gfx-i18n.js';
 
@@ -68,6 +68,6 @@ const STRINGS = {
 export const PLATFORM_LOCALES = Object.keys(STRINGS);
 
 /** Strings for the account surface in the browser's locale (en-US fallback). */
-export function platformStrings(lang = (typeof navigator !== 'undefined' ? navigator.language : 'en-US')) {
+export function platformStrings(lang = globalThis.FSI18N?.lang || (typeof navigator !== 'undefined' ? navigator.language : 'en-US')) {
   return { ...EN, ...(STRINGS[pickLocale(lang)] || {}) };
 }

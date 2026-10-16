@@ -1,7 +1,7 @@
 /**
  * Strings for the Settings → Graphics section in every supported locale.
- * The rest of the game ships in US English; this panel picks its locale
- * from navigator.language (exact tag, then language fallback).
+ * The rest of the UI is in src/i18n/strings*.js; this panel picks its locale
+ * from the game language (src/i18n; exact tag, then language fallback).
  */
 
 export const GFX_LOCALES = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT'];

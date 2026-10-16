@@ -7,7 +7,7 @@
 import { FleetScene } from './render/scene.js';
 import { fromLegacyTier } from './render/gfx.js';
 import { createAudio } from './audio/audio.js';
-import { loadSave, storeSave, defaultSave, checksumDoc, mergeSaves, SAVE_VERSION } from './platform/save.js';
+import { loadSave, storeSave, defaultSave, checksumDoc, mergeSaves, combineSaves, SAVE_VERSION } from './platform/save.js';
 import { createPlatform, applyRemoteSettings } from './platform/starhermit.js';
 import { App } from './ui/app.js';
 
@@ -30,8 +30,8 @@ async function boot() {
     ui.innerHTML = `
       <div class="screen dim">
         <div class="panel">
-          <h1>Fleet Signals</h1>
-          <p><strong>This device or browser does not support WebGL</strong>, which the holographic chart table requires.</p>
+          <h1 data-i18n-skip>Fleet Signals</h1>
+          <p>This device or browser does not support WebGL, which the holographic chart table requires.</p>
           <p>Your profile and any saved progress on this device are preserved. Try a current version of Firefox, Chrome, Edge or Safari with hardware acceleration enabled.</p>
         </div>
       </div>`;
@@ -47,7 +47,8 @@ async function boot() {
 
   let { doc, migrated, corrupted } = loadSave();
 
-  // Cloud save: remote slot is a mirror; on conflict the remote doc wins.
+  // Cloud save: remote slot is a mirror. When neither copy is a strict
+  // descendant of the other, both are merged field by field (combineSaves).
   // localStorage stays the offline cache regardless of outcome.
   if (platform.hosted) {
     try {
@@ -55,7 +56,7 @@ async function boot() {
       const valid = remote && remote.version === SAVE_VERSION && remote.checksum === checksumDoc(remote);
       if (valid) {
         const m = mergeSaves(doc, remote);
-        const winner = m.conflict ? remote : m.resolved;
+        const winner = m.conflict ? combineSaves(doc, remote) : m.resolved;
         if (checksumDoc(winner) !== checksumDoc(doc)) {
           Object.keys(doc).forEach((k) => delete doc[k]);
           Object.assign(doc, winner);
@@ -86,6 +87,23 @@ async function boot() {
       platform.syncSettings(doc.settings);
     },
   };
+
+  // Another device saved since our last read: the SDK refused the write
+  // (conditional on the version we loaded) and blocks writes until a reload.
+  // Reload, merge both sides, adopt the merge and save it again. A match in
+  // progress lives in its own resume snapshot and is untouched.
+  sh?.on('saveconflict', async () => {
+    const remote = await sh.loadJSON().catch(() => null);
+    const valid = remote && remote.version === SAVE_VERSION && remote.checksum === checksumDoc(remote);
+    const merged = valid ? combineSaves(doc, remote) : doc;
+    if (merged !== doc) {
+      Object.keys(doc).forEach((k) => delete doc[k]);
+      Object.assign(doc, merged);
+    }
+    storeSave(doc);
+    if (!sh.saveConflicted()) cloud.push(doc);
+    else { platform.syncStatus = 'error'; platform.onChange?.(); }
+  });
 
   if (platform.hosted) {
     platform.nickname().then((name) => {

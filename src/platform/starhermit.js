@@ -117,8 +117,8 @@ export function createPlatform(sh) {
       async load() {
         if (!hosted()) return null;
         setStatus('loading');
-        const info = await sh.saveInfo();
-        if (info && info.exists === false) return null;
+        // loadJSON() checks the slot info itself (an empty slot reads as null) and
+        // records the slot version, so later writes are conditional on it.
         return sh.loadJSON();
       },
     },

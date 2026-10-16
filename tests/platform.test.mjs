@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createPlatform, applyRemoteSettings, DEFAULT_KEYS } from '../src/platform/starhermit.js';
-import { defaultSave } from '../src/platform/save.js';
+import { defaultSave, combineSaves, checksumDoc } from '../src/platform/save.js';
 
 // The package is ESM, so the UMD SDK is evaluated with a CommonJS-style module object.
 const SDK = (() => { const module = { exports: {} }; new Function('module', readFileSync(new URL('../starhermit-sdk.js', import.meta.url), 'utf8'))(module); return module.exports; })();
@@ -12,14 +12,21 @@ const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const TOKEN = 'h.' + b64u({ sub: 'cap-1234567', game_scope: 'fleet-id', exp: Math.floor(Date.now() / 1000) + 3600 }) + '.s';
 
 function harness(href, routes = {}) {
-  const calls = []; const store = {}; const url = new URL(href);
+  const calls = []; const store = {}; const etags = {}; const url = new URL(href);
   const win = { location: { hash: url.hash, search: url.search, pathname: url.pathname, origin: url.origin, hostname: url.hostname, href }, history: { replaceState: (a, b, u) => { win.replaced = u; } } };
   const fetch = async (path, init = {}) => {
     const method = init.method || 'GET'; calls.push({ path, method, body: init.body });
     if (path.includes('/cloud-saves/')) {
       const key = decodeURIComponent(path.split('/cloud-saves/')[1]);
-      if (key.endsWith('/info')) return new Response(JSON.stringify({ exists: !!store[key.slice(0, -5)] }), { status: 200 });
-      if (method === 'PUT') { store[key] = Buffer.from(JSON.parse(init.body).dataBase64, 'base64'); return new Response('{}', { status: 200 }); }
+      if (key.endsWith('/info')) return new Response(JSON.stringify({ exists: !!store[key.slice(0, -5)], etag: etags[key.slice(0, -5)] || null }), { status: 200 });
+      if (method === 'PUT') {
+        // Conditional writes as the platform does them: If-Match must name the current version.
+        const h = init.headers || {};
+        if ((h['If-Match'] && h['If-Match'] !== etags[key]) || (h['If-None-Match'] === '*' && store[key])) return new Response(JSON.stringify({ error: 'precondition_failed' }), { status: 412 });
+        store[key] = Buffer.from(JSON.parse(init.body).dataBase64, 'base64');
+        etags[key] = '"v' + calls.length + '"';
+        return new Response(JSON.stringify({ etag: etags[key] }), { status: 200 });
+      }
       return store[key] ? new Response(store[key], { status: 200 }) : new Response('', { status: 404 });
     }
     const hit = Object.entries(routes).find(([k]) => `${method} ${path}`.endsWith(k));
@@ -117,7 +124,50 @@ test('leaderboard line strings in every locale', async () => {
 });
 
 test('sign-in offered on the platform host without a token', () => {
-  const h = harness('https://fleet-id.starhermit.com/');
+  const h = harness('https://0b9d6f2e-3c4a-4e5b-9a7c-1d2e3f405162.starhermit.com/');
   assert.equal(h.platform.canSignIn(), true);
   assert.equal(h.calls.length, 0);
+});
+
+test('combineSaves keeps both devices\' progress', () => {
+  const a = defaultSave(), b = defaultSave();
+  a.journey.completed.j01 = { stars: 2, score: 900, bestShots: 20 };
+  b.journey.completed.j01 = { stars: 3, score: 800, bestShots: 18 };
+  b.journey.completed.j02 = { stars: 1, score: 500, bestShots: 40 };
+  a.challenges.completed.c01 = { score: 700 };
+  b.dailies['2026-10-15'] = { score: 600, won: true, stars: 2 };
+  a.dailies['2026-10-15'] = { score: 650, won: false, stars: 1 };
+  a.achievements['first-victory'] = '2026-10-02T00:00:00Z';
+  b.achievements['first-victory'] = '2026-10-01T00:00:00Z';
+  b.achievements.sharpshooter = '2026-10-03T00:00:00Z';
+  a.stats.sessions = 4; b.stats.sessions = 9; a.stats.wins = 3; b.stats.wins = 2;
+  a.boards.entries = [{ board: 'daily', seed: 's1', date: 'd1', score: 10 }];
+  b.boards.entries = [{ board: 'daily', seed: 's1', date: 'd1', score: 10 }, { board: 'journey', seed: 's2', date: 'd2', score: 20 }];
+  b.tutorial = { done: true, step: 5 };
+  a.profile.name = 'This device';
+  const m = combineSaves(a, b);
+  assert.deepEqual(m.journey.completed.j01, { stars: 3, score: 900, bestShots: 18 });
+  assert.equal(m.journey.completed.j02.stars, 1);
+  assert.equal(m.challenges.completed.c01.score, 700);
+  assert.deepEqual(m.dailies['2026-10-15'], { score: 650, won: true, stars: 2 });
+  assert.equal(m.achievements['first-victory'], '2026-10-01T00:00:00Z');
+  assert.ok(m.achievements.sharpshooter);
+  assert.equal(m.stats.sessions, 9); assert.equal(m.stats.wins, 3);
+  assert.equal(m.boards.entries.length, 2);
+  assert.deepEqual(m.tutorial, { done: true, step: 5 });
+  assert.equal(m.profile.name, 'This device');
+  assert.equal(m.checksum, checksumDoc(m));
+});
+
+test('save conflict: a write that lost to another device is refused and reported', async () => {
+  const h = harness('https://fleet-id.starhermit.com/#game_token=' + TOKEN);
+  assert.equal(await h.platform.cloud.load(), null);
+  h.store['game:fleet-id'] = Buffer.from('saved elsewhere'); // another device wrote since the load
+  let conflicts = 0;
+  h.sh.on('saveconflict', () => { conflicts++; });
+  h.platform.cloud.push(defaultSave());
+  assert.equal(await h.platform.cloud.flush(), false);
+  assert.equal(conflicts, 1);
+  assert.equal(h.sh.saveConflicted(), true);
+  assert.equal(h.platform.syncStatus, 'error');
 });

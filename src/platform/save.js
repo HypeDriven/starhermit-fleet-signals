@@ -132,6 +132,51 @@ export function mergeSaves(local, remote) {
   return { conflict: true, local, remote };
 }
 
+/**
+ * Merge two diverged save docs field by field so neither device loses
+ * progress: union of cleared stages, challenges, dailies and achievements
+ * (best stars/score, fewest shots, earliest unlock), the larger of each
+ * career counter, the union of local leaderboard entries, and tutorial
+ * progress. Profile and settings come from `local` (this device). Returns a
+ * new doc with a fresh checksum.
+ */
+export function combineSaves(local, remote) {
+  const a = local || defaultSave();
+  const b = remote || defaultSave();
+  const num = (x) => (Number.isFinite(x) ? x : 0);
+  const out = JSON.parse(JSON.stringify(a));
+  const union = (x, y, merge) => {
+    const res = {};
+    for (const k of new Set([...Object.keys(x || {}), ...Object.keys(y || {})])) {
+      res[k] = x?.[k] && y?.[k] ? merge(x[k], y[k]) : JSON.parse(JSON.stringify(x?.[k] ?? y?.[k]));
+    }
+    return res;
+  };
+  out.journey = { completed: union(a.journey?.completed, b.journey?.completed, (x, y) => ({
+    stars: Math.max(num(x.stars), num(y.stars)),
+    score: Math.max(num(x.score), num(y.score)),
+    bestShots: Math.min(x.bestShots ?? Infinity, y.bestShots ?? Infinity),
+  })) };
+  out.challenges = { completed: union(a.challenges?.completed, b.challenges?.completed, (x, y) => ({ score: Math.max(num(x.score), num(y.score)) })) };
+  out.dailies = union(a.dailies, b.dailies, (x, y) => ({ score: Math.max(num(x.score), num(y.score)), won: !!(x.won || y.won), stars: Math.max(num(x.stars), num(y.stars)) }));
+  out.achievements = union(a.achievements, b.achievements, (x, y) => (String(x) < String(y) ? x : y));
+  const sa = a.stats || {}, sb = b.stats || {};
+  out.stats = { ...sa };
+  for (const k of ['sessions', 'wins', 'losses', 'shots', 'hits', 'sunk', 'bestAccuracy', 'dailyStreak']) out.stats[k] = Math.max(num(sa[k]), num(sb[k]));
+  out.stats.lastDailyDate = [sa.lastDailyDate, sb.lastDailyDate].filter(Boolean).sort().pop() || null;
+  const seen = new Set();
+  out.boards = { entries: [...(a.boards?.entries || []), ...(b.boards?.entries || [])].filter((e) => {
+    const id = JSON.stringify([e?.board, e?.seed, e?.date, e?.score]);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  }).sort((x, y) => (y?.score || 0) - (x?.score || 0)).slice(0, BOARD_ENTRY_CAP) };
+  out.tutorial = { done: !!(a.tutorial?.done || b.tutorial?.done), step: Math.max(num(a.tutorial?.step), num(b.tutorial?.step)) };
+  out.version = SAVE_VERSION;
+  out.checksum = checksumDoc(out);
+  return out;
+}
+
 /** Append a leaderboard entry, keep score-desc order, cap at 100. */
 export function recordBoardEntry(doc, entry) {
   // A checksum-valid but hand-edited doc may be missing the board; the
