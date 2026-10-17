@@ -17,7 +17,10 @@ import {
 } from '../server.js';
 import {
   PRESETS, CATEGORIES, detectPreset, resolve, presetTier, choosePreset, describe, fromLegacyTier,
+  LEVELS, BUDGETS, budget, detectLevel, presetForLevel, particleCap,
 } from '../src/render/gfx.js';
+// src/render/gpu-level.js is a classic script in the page; imported here it sets globalThis.StarHermitGpu.
+await import('../src/render/gpu-level.js');
 import { GFX_LOCALES, gfxStrings, pickGfxLocale } from '../src/ui/gfx-i18n.js';
 
 let passed = 0;
@@ -669,16 +672,42 @@ test('golden: scripted easy/medium/hard sessions match pinned hashes', () => {
 
 /* ==================== graphics quality model ==================== */
 
-test('gfx: detectPreset maps GPU strings to presets', () => {
+test('gfx: hardware level picks the Auto preset (StarHermit gpu-level.js)', () => {
   eq(detectPreset('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)'), 'low');
   eq(detectPreset('llvmpipe (LLVM 15.0.7, 256 bits)'), 'low');
-  eq(detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0)'), 'high');
-  eq(detectPreset('Apple M2'), 'high');
-  eq(detectPreset('ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11)'), 'balanced');
-  eq(detectPreset('Adreno (TM) 650'), 'balanced');
-  eq(detectPreset(''), 'balanced');
-  eq(detectPreset('Apple M2', { mobile: true }), 'balanced', 'touch devices cap Auto at Balanced');
+  eq(detectPreset('ANGLE (AMD, AMD Radeon(TM) Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)'), 'low');
+  eq(detectPreset('ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11)'), 'low');
+  eq(detectPreset('ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11)'), 'balanced');
+  eq(detectPreset('ANGLE (NVIDIA, NVIDIA GeForce GTX 1070 Direct3D11 vs_5_0 ps_5_0)'), 'high');
+  eq(detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 Direct3D11 vs_5_0 ps_5_0)'), 'ultra');
+  eq(detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 5090 Direct3D11 vs_5_0 ps_5_0)'), 'ultra');
+  eq(detectLevel('NVIDIA GeForce RTX 5090'), 20);
+  eq(detectLevel('SwiftShader'), 0);
+  for (const [p, lv] of Object.entries(LEVELS)) eq(presetForLevel(lv), p);
+  eq(presetForLevel(9), 'balanced');
+  eq(presetForLevel(16), 'high');
+  assert(['low', 'balanced'].includes(detectPreset('Adreno (TM) 740', { mobile: true })), 'mobile Adreno 740 is Balanced at most');
+  eq(detectPreset('NVIDIA GeForce RTX 5090', { mobile: true }), 'balanced', 'phones/tablets cap at Balanced');
   eq(detectPreset('SwiftShader', { mobile: true }), 'low');
+});
+
+test('gfx: per-preset budgets are explicit, grow from Low to Ultra and scale with the level', () => {
+  const keys = ['material', 'chart', 'brushed', 'sea', 'segments', 'stars', 'sparks', 'hudBlur', 'bloomRes', 'aoRes'];
+  for (const p of PRESETS) for (const k of keys) assert(k in BUDGETS[p], `${p}.${k}`);
+  for (let i = 1; i < PRESETS.length; i++) {
+    const a = BUDGETS[PRESETS[i - 1]], b = BUDGETS[PRESETS[i]];
+    for (const k of ['chart', 'brushed', 'sea', 'segments', 'stars', 'sparks', 'bloomRes', 'aoRes']) assert(b[k] >= a[k], `${PRESETS[i]}.${k}`);
+  }
+  eq(BUDGETS.low.material, 'lambert');
+  eq(BUDGETS.balanced.hudBlur, false);
+  eq(BUDGETS.high.hudBlur, true);
+  eq(JSON.stringify(budget('high', 10)), JSON.stringify(BUDGETS.high), 'floor level = table');
+  assert(budget('high', 14).sparks > BUDGETS.high.sparks, 'sparks grow above the floor');
+  assert(budget('ultra', 20).sparks <= BUDGETS.ultra.sparks * 2, 'at most 2x');
+  assert(budget('ultra', 2).sparks < BUDGETS.ultra.sparks, 'fewer below the floor');
+  eq(particleCap('high', BUDGETS.low), 1600);
+  eq(JSON.stringify(resolve({ preset: 'low' }, 'low', 0).budget), JSON.stringify(BUDGETS.low));
+  eq(resolve({}, 'ultra', 20).level, 20);
 });
 
 test('gfx: resolve applies preset, overrides and clamps render scale', () => {

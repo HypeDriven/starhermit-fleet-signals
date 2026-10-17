@@ -140,6 +140,8 @@ async function runPass({ name, viewport, hasTouch }) {
       await page.locator('#gfx-preset').scrollIntoViewIfNeeded();
       if ((await preset()) !== 'low') throw new Error('headless software GPU should resolve Auto to Low, got ' + (await preset()));
       if (!/detected/i.test(await page.textContent('#gfx-preset option[value="auto"]'))) throw new Error('Auto option lacks the detected tier');
+      // The summary names the StarHermit hardware level (software GPU = level 0).
+      if (!/Level 0/.test(await summary())) throw new Error('summary lacks the hardware level: ' + (await summary()));
       await page.selectOption('#gfx-preset', 'low');
       await page.waitForFunction(() => document.body.dataset.gfxPreset === 'low');
       if (!/no shadows/.test(await summary())) throw new Error('Low summary: ' + (await summary()));

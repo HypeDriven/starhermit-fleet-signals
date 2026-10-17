@@ -7,7 +7,7 @@
 export const GFX_LOCALES = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT'];
 
 const en = {
-  graphics: 'Graphics', quality: 'Quality', auto: 'Auto (detected: {tier})', renderScale: 'Render scale',
+  graphics: 'Graphics', quality: 'Quality', level: 'Level {level}', auto: 'Auto (detected: {tier})', renderScale: 'Render scale',
   fromPreset: 'From preset ({tier})', adaptive: 'Adaptive resolution', showFps: 'Show frame rate',
   postFailed: 'Post-processing is unavailable on this device, so effects that need it are off.',
   cat: {
@@ -21,7 +21,7 @@ const en = {
 };
 
 const es = {
-  graphics: 'Gráficos', quality: 'Calidad', auto: 'Automática (detectada: {tier})', renderScale: 'Escala de renderizado',
+  graphics: 'Gráficos', quality: 'Calidad', level: 'Nivel {level}', auto: 'Automática (detectada: {tier})', renderScale: 'Escala de renderizado',
   fromPreset: 'Según ajuste ({tier})', adaptive: 'Resolución adaptativa', showFps: 'Mostrar fotogramas por segundo',
   postFailed: 'El posprocesado no está disponible en este dispositivo; los efectos que lo necesitan están desactivados.',
   cat: {
@@ -35,7 +35,7 @@ const es = {
 };
 
 const fr = {
-  graphics: 'Graphismes', quality: 'Qualité', auto: 'Automatique (détectée : {tier})', renderScale: 'Échelle de rendu',
+  graphics: 'Graphismes', quality: 'Qualité', level: 'Niveau {level}', auto: 'Automatique (détectée : {tier})', renderScale: 'Échelle de rendu',
   fromPreset: 'Préréglage ({tier})', adaptive: 'Résolution adaptative', showFps: 'Afficher les images par seconde',
   postFailed: 'Le post-traitement est indisponible sur cet appareil ; les effets qui en dépendent sont désactivés.',
   cat: {
@@ -56,7 +56,7 @@ const STRINGS = {
   'fr-FR': fr,
   'fr-CA': { ...fr, graphics: 'Graphiques', cat: { ...fr.cat, antialias: 'Anticrénelage (lissage)' } },
   'de-DE': {
-    graphics: 'Grafik', quality: 'Qualität', auto: 'Automatisch (erkannt: {tier})', renderScale: 'Renderskalierung',
+    graphics: 'Grafik', quality: 'Qualität', level: 'Stufe {level}', auto: 'Automatisch (erkannt: {tier})', renderScale: 'Renderskalierung',
     fromPreset: 'Voreinstellung ({tier})', adaptive: 'Adaptive Auflösung', showFps: 'Bildrate anzeigen',
     postFailed: 'Nachbearbeitung ist auf diesem Gerät nicht verfügbar; Effekte, die sie benötigen, sind aus.',
     cat: {
@@ -69,7 +69,7 @@ const STRINGS = {
     },
   },
   'pt-BR': {
-    graphics: 'Gráficos', quality: 'Qualidade', auto: 'Automática (detectada: {tier})', renderScale: 'Escala de renderização',
+    graphics: 'Gráficos', quality: 'Qualidade', level: 'Nível {level}', auto: 'Automática (detectada: {tier})', renderScale: 'Escala de renderização',
     fromPreset: 'Predefinição ({tier})', adaptive: 'Resolução adaptativa', showFps: 'Mostrar quadros por segundo',
     postFailed: 'O pós-processamento não está disponível neste dispositivo; os efeitos que dependem dele estão desligados.',
     cat: {
@@ -82,7 +82,7 @@ const STRINGS = {
     },
   },
   'it-IT': {
-    graphics: 'Grafica', quality: 'Qualità', auto: 'Automatica (rilevata: {tier})', renderScale: 'Scala di rendering',
+    graphics: 'Grafica', quality: 'Qualità', level: 'Livello {level}', auto: 'Automatica (rilevata: {tier})', renderScale: 'Scala di rendering',
     fromPreset: 'Dal preset ({tier})', adaptive: 'Risoluzione adattiva', showFps: 'Mostra fotogrammi al secondo',
     postFailed: 'La post-elaborazione non è disponibile su questo dispositivo; gli effetti che la richiedono sono disattivati.',
     cat: {

@@ -746,7 +746,7 @@ export class App {
     const summary = () => {
       const info = this.scene.graphicsInfo();
       const sum = box.querySelector('#gfx-summary');
-      if (sum) sum.textContent = `${info.gpu} · ${info.summary}${info.resolved.showFps && info.fps ? ` · ${info.fps} fps` : ''}`;
+      if (sum) sum.textContent = `${info.gpu} · ${fill(G.level, { level: info.level ?? 0 })} · ${info.summary}${info.resolved.showFps && info.fps ? ` · ${info.fps} fps` : ''}`;
       const note = box.querySelector('#gfx-post-note');
       if (note) note.hidden = !info.postFailed;
       box.dataset.gfxPreset = info.resolved.preset;

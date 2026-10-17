@@ -15,7 +15,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { detectPreset, resolve, describe, SHADOW_MAP, SEA_SEGMENTS, PARTICLE_CAP } from './gfx.js';
+import { detectLevel, presetForLevel, resolve, describe, SHADOW_MAP, SEA_SEGMENTS, particleCap } from './gfx.js';
 import { makeRng } from '../rules/rng.js';
 import { cellToXY, cellName } from '../rules/engine.js';
 
@@ -45,21 +45,52 @@ const GradeShader = {
     }`,
 };
 
+// Round-geometry LOD: radial segments scaled by the preset budget (at least 8).
+function seg(n, k) { return Math.max(8, Math.round(n * (k || 1))); }
+
+// Run a post pass at a fraction of the frame (per-preset budget). EffectComposer sizes every pass to the
+// full frame in addPass/setSize, so the pass's own setSize is wrapped to apply the scale.
+function atScale(pass, k) {
+  if (!(k > 0 && k < 1)) return pass;
+  const setSize = pass.setSize.bind(pass);
+  pass.setSize = (w, h) => setSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+  return pass;
+}
+
+// Sky dust from the deterministic visual stream (count = preset budget's `stars`).
+function starGeometry(seed, count) {
+  const vrng = makeRng(seed + ':stars');
+  const starPos = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const ang = vrng.next() * Math.PI * 2;
+    const el = 0.15 + vrng.next() * 1.2;
+    const r = 70;
+    starPos[i * 3] = Math.cos(ang) * Math.cos(el) * r;
+    starPos[i * 3 + 1] = Math.sin(el) * r * 0.6;
+    starPos[i * 3 + 2] = Math.sin(ang) * Math.cos(el) * r;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  return geo;
+}
+
 /** Standard material with the scene-wide image-based-lighting strength. */
 function envify(mat, k = 1) {
   mat.envMapIntensity = 0.32 * k;
   return mat;
 }
 
-/** Engraved chart for the table top: range rings, bearing ticks, compass rose. */
-function makeChartTexture() {
+/** Engraved chart for the table top: range rings, bearing ticks, compass rose. Drawn in 1024-px units
+ * at the preset budget's size `n`. */
+function makeChartTexture(n = 1024) {
   const doc = globalThis.document;
   if (!doc) return null;
   const N = 1024;
   const c = doc.createElement('canvas');
-  c.width = c.height = N;
+  c.width = c.height = n;
   const g = c.getContext('2d');
   if (!g) return null;
+  g.scale(n / N, n / N);
   g.fillStyle = '#000';
   g.fillRect(0, 0, N, N);
   const cx = N / 2, R = N / 2 - 4;
@@ -109,13 +140,14 @@ function makeChartTexture() {
 }
 
 /** Brushed-metal streaks for the pedestal (roughness + bump). */
-function makeBrushedTexture() {
+function makeBrushedTexture(n = 512) {
   const doc = globalThis.document;
   if (!doc) return null;
   const c = doc.createElement('canvas');
-  c.width = 512; c.height = 128;
+  c.width = n; c.height = n / 4;
   const g = c.getContext('2d');
   if (!g) return null;
+  g.scale(n / 512, n / 512); // drawn in 512 × 128 units at the preset budget's width
   g.fillStyle = '#8a8a8a';
   g.fillRect(0, 0, 512, 128);
   const rng = makeRng('fleet-signals:brushed');
@@ -436,6 +468,7 @@ class ParticlePool {
 
   emit(origin, { count, color, speed = 2.2, up = 2.6, size = 2.2, life = 0.8, spread = 0.4 }) {
     this.color.set(color);
+    count = Math.max(1, Math.round(count * (this.scale || 1))); // preset budget `sparks`
     for (let n = 0; n < count; n++) {
       const i = this.head;
       this.head = (this.head + 1) % this.max;
@@ -666,9 +699,13 @@ export class FleetScene {
     this.gpu = String(gpu || '') || 'unknown GPU';
     const nav = globalThis.navigator || {};
     const mm = (q) => { try { return globalThis.matchMedia?.(q).matches; } catch { return false; } };
-    const mobile = /Mobi|Android|iPhone|iPad/i.test(nav.userAgent || '')
+    // StarHermit hardware level → Auto preset (SwiftShader = level 0 → Low; phones cap at Balanced).
+    const G = globalThis.StarHermitGpu;
+    const system = G ? G.detectSystem() : {};
+    const mobile = !!system.mobile || /Mobi|Android|iPhone|iPad/i.test(nav.userAgent || '')
       || (mm('(pointer: coarse)') && !mm('(any-pointer: fine)'));
-    this.detected = detectPreset(gpu, { mobile });
+    this.level = detectLevel(gpu, { ...system, mobile });
+    this.detected = presetForLevel(this.level);
   }
 
   _initScene() {
@@ -720,40 +757,43 @@ export class FleetScene {
 
     // captain's chart table: pedestal + rim + holo surface
     this.table = new THREE.Group();
-    const pedestal = new THREE.Mesh(
+    // Round geometry follows the preset LOD (budget.segments): [mesh, segments → geometry].
+    this.lodMeshes = [];
+    const lod = (mesh, make) => { this.lodMeshes.push([mesh, make]); return mesh; };
+    const pedestal = lod(new THREE.Mesh(
       new THREE.CylinderGeometry(5.4, 6.2, 1.6, 64),
       envify(new THREE.MeshStandardMaterial({ color: 0x2a3340, roughness: 0.55, metalness: 0.75 })),
-    );
+    ), (k) => new THREE.CylinderGeometry(5.4, 6.2, 1.6, seg(64, k)));
     pedestal.position.y = -0.85;
     pedestal.receiveShadow = true;
     this.table.add(pedestal);
-    const rim = new THREE.Mesh(
+    const rim = lod(new THREE.Mesh(
       new THREE.TorusGeometry(5.45, 0.09, 16, 96),
       envify(new THREE.MeshStandardMaterial({
         color: 0x59e6ff, emissive: 0x59e6ff, emissiveIntensity: 0.8, roughness: 0.3, metalness: 0.2,
       }), 0.5),
-    );
+    ), (k) => new THREE.TorusGeometry(5.45, 0.09, seg(16, k), seg(96, k)));
     rim.rotation.x = Math.PI / 2;
     rim.position.y = -0.02;
     this.table.add(rim);
-    const surface = new THREE.Mesh(
+    const surface = lod(new THREE.Mesh(
       new THREE.CylinderGeometry(5.4, 5.4, 0.08, 64),
       envify(new THREE.MeshStandardMaterial({
         color: 0x0d2438, roughness: 0.25, metalness: 0.4,
         emissive: 0x0d2c44, emissiveIntensity: 0.5, transparent: true, opacity: 0.92,
       }), 0.3),
-    );
+    ), (k) => new THREE.CylinderGeometry(5.4, 5.4, 0.08, seg(64, k)));
     surface.position.y = -0.04;
     surface.receiveShadow = true;
     this.table.add(surface);
     // engraved chart (range rings, bearing ticks) — `detail` setting
-    this.engraving = new THREE.Mesh(
+    this.engraving = lod(new THREE.Mesh(
       new THREE.CircleGeometry(5.36, 96),
       new THREE.MeshBasicMaterial({
         color: 0x63e2f2, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
-    );
+    ), (k) => new THREE.CircleGeometry(5.36, seg(96, k)));
     this.engraving.rotation.x = -Math.PI / 2;
     this.engraving.position.y = 0.004;
     this.engraving.visible = false;
@@ -761,7 +801,7 @@ export class FleetScene {
     this.table.add(this.engraving);
     // sonar sweep across the chart — `background` setting, off with reduced motion
     this.sweepUniforms = { uAngle: { value: 0 }, uColor: { value: new THREE.Color(0x63e2f2) }, uAlpha: { value: 0.16 } };
-    this.sweep = new THREE.Mesh(
+    this.sweep = lod(new THREE.Mesh(
       new THREE.CircleGeometry(5.36, 96),
       new THREE.ShaderMaterial({
         uniforms: this.sweepUniforms,
@@ -781,7 +821,7 @@ export class FleetScene {
             #include <colorspace_fragment>
           }`,
       }),
-    );
+    ), (k) => new THREE.CircleGeometry(5.36, seg(96, k)));
     this.sweep.rotation.x = -Math.PI / 2;
     this.sweep.position.y = 0.008;
     this.sweep.visible = false;
@@ -824,19 +864,7 @@ export class FleetScene {
     this.scene.add(lamps);
 
     // stars / sky dust
-    const starCount = 400;
-    const starPos = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount; i++) {
-      const ang = vrng.next() * Math.PI * 2;
-      const el = 0.15 + vrng.next() * 1.2;
-      const r = 70;
-      starPos[i * 3] = Math.cos(ang) * Math.cos(el) * r;
-      starPos[i * 3 + 1] = Math.sin(el) * r * 0.6;
-      starPos[i * 3 + 2] = Math.sin(ang) * Math.cos(el) * r;
-    }
-    const starGeo = new THREE.BufferGeometry();
-    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-    this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
+    this.stars = new THREE.Points(starGeometry(this.visualSeed, 400), new THREE.PointsMaterial({
       color: 0xbfd9ff, size: 0.25, sizeAttenuation: true, transparent: true, opacity: 0.7,
     }));
     this.stars.raycast = () => {};
@@ -847,8 +875,8 @@ export class FleetScene {
   }
 
   _buildWater() {
-    const seg = SEA_SEGMENTS[this.q.water] || SEA_SEGMENTS.simple;
-    const geo = new THREE.PlaneGeometry(140, 140, seg, seg);
+    const n = this.q.water === 'detailed' ? this.q.budget.sea : SEA_SEGMENTS.simple; // preset budget
+    const geo = new THREE.PlaneGeometry(140, 140, n, n);
     if (this.water) {
       this.water.geometry.dispose();
       this.water.geometry = geo;
@@ -867,7 +895,8 @@ export class FleetScene {
       this.particles.points.geometry.dispose();
       this.particles.points.material.dispose();
     }
-    this.particles = new ParticlePool(PARTICLE_CAP[this.q.particles] || PARTICLE_CAP.low);
+    this.particles = new ParticlePool(particleCap(this.q.particles, this.q.budget));
+    this.particles.scale = this.q.budget.sparks;
     this.scene.add(this.particles.points);
   }
 
@@ -913,8 +942,9 @@ export class FleetScene {
     this._gfxJson = json;
     this.gfxSaved = JSON.parse(json);
     const prev = force ? {} : (this.q || {});
-    const g = resolve(this.gfxSaved, this.detected);
+    const g = resolve(this.gfxSaved, this.detected, this.level);
     this.q = g;
+    const pb = prev.budget || {}, b = g.budget;
     // shadows: enable + map size; every lit material recompiles on a toggle
     const size = SHADOW_MAP[g.shadows];
     const shadowToggle = this.renderer.shadowMap.enabled !== size > 0;
@@ -927,10 +957,15 @@ export class FleetScene {
     }
     this._fitShadow();
     this._applyReflections();
-    if (prev.water !== g.water) this._buildWater();
+    if (prev.water !== g.water || pb.sea !== b.sea) this._buildWater();
     this.waterUniforms.uDetail.value = g.water === 'detailed' ? 1 : 0;
-    if (prev.particles !== g.particles) this._buildParticles();
-    if (prev.detail !== g.detail) this._applyDetail();
+    if (prev.particles !== g.particles || pb.sparks !== b.sparks) this._buildParticles();
+    if (pb.segments !== b.segments) for (const [mesh, make] of this.lodMeshes) { mesh.geometry.dispose(); mesh.geometry = make(b.segments); }
+    if (pb.stars !== b.stars) { this.stars.geometry.dispose(); this.stars.geometry = starGeometry(this.visualSeed, b.stars); }
+    this._applyMaterialClass(b.material === 'lambert');
+    if (prev.detail !== g.detail || pb.chart !== b.chart || pb.brushed !== b.brushed || pb.material !== b.material) this._applyDetail(pb);
+    // Frosted backdrop blur behind dimmed screens/overlays only where the budget allows it.
+    globalThis.document?.body?.classList.toggle('gfx-hud-blur', !!b.hudBlur);
     this._applyAmbient();
     this.adaptiveScale = 1;
     this._frames = [];
@@ -954,6 +989,7 @@ export class FleetScene {
     const px = [Math.round(this.size[0] * this.pixelRatio), Math.round(this.size[1] * this.pixelRatio)];
     return {
       gpu: this.gpu,
+      level: this.level,
       detected: this.detected,
       resolved: { ...this.q },
       summary: describe(this.q, px),
@@ -981,10 +1017,30 @@ export class FleetScene {
     }
   }
 
-  _applyDetail() {
+  // Material class: Lambert twins of the table pedestal, buoys and lamps on Low; Standard above.
+  _applyMaterialClass(lambert) {
+    this._lambertOf = this._lambertOf || new Map();
+    for (const mesh of [this.pedestal, this.buoys, this.lamps]) {
+      const base = mesh.userData.stdMaterial || mesh.material;
+      mesh.userData.stdMaterial = base;
+      if (lambert && !this._lambertOf.has(base)) {
+        this._lambertOf.set(base, new THREE.MeshLambertMaterial({
+          color: base.color.clone(), emissive: base.emissive.clone(), emissiveIntensity: base.emissiveIntensity,
+        }));
+      }
+      const l = this._lambertOf.get(base);
+      if (l) { l.color.copy(base.color); l.emissive.copy(base.emissive); }
+      mesh.material = lambert ? l : base;
+    }
+  }
+
+  _applyDetail(pb = {}) {
     const detailed = this.q.detail === 'detailed';
-    if (detailed && !this._chartTex) this._chartTex = makeChartTexture();
-    if (detailed && !this._brushTex) this._brushTex = makeBrushedTexture();
+    const b = this.q.budget;
+    if (this._chartTex && pb.chart !== b.chart) { this._chartTex.dispose(); this._chartTex = null; }
+    if (this._brushTex && pb.brushed !== b.brushed) { this._brushTex.dispose(); this._brushTex = null; }
+    if (detailed && !this._chartTex) this._chartTex = makeChartTexture(b.chart);
+    if (detailed && !this._brushTex) this._brushTex = makeBrushedTexture(b.brushed);
     this.engraving.material.map = detailed ? this._chartTex : null;
     this.engraving.material.needsUpdate = true;
     this.engraving.visible = detailed && !!this._chartTex;
@@ -1122,7 +1178,7 @@ export class FleetScene {
       composer.setSize(w, h);
       composer.addPass(new RenderPass(this.scene, this.camera));
       if (g.ao !== 'off') {
-        const ao = new GTAOPass(this.scene, this.camera, w * pr, h * pr);
+        const ao = atScale(new GTAOPass(this.scene, this.camera, w * pr, h * pr), g.budget.aoRes);
         ao.output = GTAOPass.OUTPUT.Default;
         ao.blendIntensity = g.ao === 'high' ? 0.7 : 0.55;
         ao.updateGtaoMaterial({ radius: 0.45, distanceExponent: 1.4, thickness: 1.0, scale: 1.0, samples: g.ao === 'high' ? 16 : 8 });
@@ -1131,7 +1187,7 @@ export class FleetScene {
       }
       if (g.bloom === 'on') {
         // High threshold: only emissive highlights (rim, hit spears, mines, sparks, buoy lamps) bloom.
-        composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.45, 0.4, 0.86));
+        composer.addPass(atScale(new UnrealBloomPass(new THREE.Vector2(w, h), 0.45, 0.4, 0.86), g.budget.bloomRes));
       }
       composer.addPass(new OutputPass());
       if (g.grade === 'on') composer.addPass(new ShaderPass(GradeShader));
@@ -1239,7 +1295,24 @@ export class FleetScene {
 
   _shipMaterial(kind) {
     const detailed = this.q?.detail === 'detailed';
+    const mat = this.q?.budget?.material || 'standard';
+    // Low budget: Lambert hulls (same colours, no PBR lighting).
+    if (mat === 'lambert') {
+      if (kind === 'own') return new THREE.MeshLambertMaterial(detailed ? { color: 0xffffff, vertexColors: true } : { color: 0x8a97a8 });
+      if (kind === 'wreck') {
+        const m = new THREE.MeshLambertMaterial({ color: 0x3a2f2f, emissive: 0xff3300, emissiveIntensity: 0.12 });
+        this.wreckMats.push(m);
+        return m;
+      }
+      return new THREE.MeshLambertMaterial({
+        color: this.holoShipColor || 0x59e6ff, transparent: true, opacity: 0.4,
+        emissive: this.holoShipColor || 0x59e6ff, emissiveIntensity: 0.6,
+      });
+    }
     if (kind === 'own') {
+      if (detailed && mat !== 'physical') {
+        return envify(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.42, metalness: 0.7 }), 1.2);
+      }
       if (detailed) {
         return envify(new THREE.MeshPhysicalMaterial({
           color: 0xffffff, vertexColors: true, roughness: 0.42, metalness: 0.7,
