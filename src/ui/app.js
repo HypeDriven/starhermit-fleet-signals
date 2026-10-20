@@ -1762,13 +1762,36 @@ export class App {
     } else {
       html = '<span style="color:var(--text-dim);padding:8px">Resolving…</span>';
     }
-    if (tray.dataset.phase !== st.phase) { tray.scrollTop = 0; tray.scrollLeft = 0; tray.dataset.phase = st.phase; }
-    tray.innerHTML = html;
-    requestAnimationFrame(() => this.scene?.refit?.());
     if (!tray.dataset.wired) {
       tray.dataset.wired = '1';
       tray.addEventListener('click', (ev) => this._trayClick(ev));
+      tray.addEventListener('pointerdown', () => { this._trayPressed = true; });
     }
+    if (!this._trayRelease) {
+      // The click follows the release in the same task; the held redraw runs after it.
+      this._trayRelease = () => {
+        if (!this._trayPressed) return;
+        this._trayPressed = false;
+        if (this._trayHeld) { this._trayHeld = false; setTimeout(() => this._renderTray(), 0); }
+      };
+      document.addEventListener('pointerup', this._trayRelease, true);
+      document.addEventListener('pointercancel', this._trayRelease, true);
+    }
+    // A press on the tray holds its redraw until the release: a click only fires
+    // when press and release land on the same button, and the tray is redrawn
+    // as each shot's animation settles. Unchanged markup is not redrawn at all.
+    if (this._trayPressed) { this._trayHeld = true; return; }
+    if (tray._html === html) return;
+    if (tray.dataset.phase !== st.phase) { tray.scrollTop = 0; tray.scrollLeft = 0; tray.dataset.phase = st.phase; }
+    // Keyboard focus on a tray button moves to the same control's new button.
+    const active = document.activeElement;
+    const focusKey = active && active !== tray && tray.contains(active)
+      ? ['tact', 'ship', 'target'].map((k) => active.dataset[k] && `[data-${k}="${active.dataset[k]}"]`).find(Boolean)
+      : null;
+    tray.innerHTML = html;
+    tray._html = html;
+    if (focusKey) tray.querySelector(focusKey)?.focus({ preventScroll: true });
+    requestAnimationFrame(() => this.scene?.refit?.());
   }
 
   _trayClick(ev) {

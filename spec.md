@@ -126,6 +126,7 @@
 
 **Desktop (≥1024 px).** `hud-top` (pause, objective title/sub, turn badge), left rail (own fleet with hit pips, enemy summary), right rail (Signals log, last 12 lines), centred chart, bottom tray. Panels max 640 px (880 px wide variant), body text ≤ 70 ch.
 **Compact (<1024 px).** Rails become slide-in drawers toggled by ☰ / ≡ buttons in the HUD, capped at 45 vh.
+**Tray redraws.** The tray is redrawn only when its markup changes, never while a pointer is pressed on it (the redraw as a shot's animation settles waits for the release, so the click lands on the button it was pressed on), and keyboard focus on a tray button moves to the same control's new button.
 **Portrait mobile.** Tray scrolls horizontally in the thumb zone, objective subtitle hidden; title art strip ≤ 26 vh and results art ≤ 22 vh (hidden entirely under 560 px height).
 **Landscape mobile (≤500 px tall).** Rails 190 px, tighter HUD and tray padding.
 **Large screens (>1600×1000).** `ui-scale.js` sets `--ui-scale` (min(width/1600, height/1000), capped at 2.5; 2560×1440 → 1.44, 3840×2160 → 2.16); the `#ui` layer, caption line and FPS meter are CSS-`zoom`ed by it with their vw/vh lengths divided by it, so HUD, rails, tray, panels and toasts grow proportionally and the chart is re-fitted inside the larger HUD's safe rectangle; the full-screen canvas and the projected coordinate-label layer are not zoomed — the labels multiply their font size and offsets by the scale instead.
