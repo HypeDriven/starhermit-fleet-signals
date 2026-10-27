@@ -1,6 +1,6 @@
 # Fleet Signals — Game Design Document (running spec)
 
-**Status:** shipped; this document describes the game as it runs today (present tense).
+**Status:** shipped; this document describes the game as it runs today (present tense), a StarHermit engine script game pinned to engine 1.17.0 (host API 1.19, `engine.minor=19`).
 **Version markers:** rules v3 (`RULES_VERSION`), content v1 (`CONTENT_VERSION`), save v2 (`SAVE_VERSION`), replay schema 1.
 
 ## 1. Overview
@@ -12,39 +12,37 @@
 | Genre | Hidden-information turn-based naval strategy (secret placement + coordinate fire + deduction) |
 | Players | 1 vs deterministic AI (Learn, Journey, Daily, Practice, Challenge); 2–4 humans pass-and-play at one device (Hosted Table) |
 | Session | 4 min (6×6 patrol fleet) · 8 min (8×8 standard) · 12 min (10×10 vanguard); Journey stages 1–5 are the short tier |
-| Platforms | Desktop and mobile browsers with WebGL; keyboard, mouse, touch and gamepad |
-| Rendering | Three.js (`vendor/three.module.js`, ES module import map) draws the chart table, sea and pieces; every menu, HUD, form and overlay is semantic HTML layered over the canvas |
+| Platforms | The StarHermit client (native) and browsers through the engine's web runtime (`index.html` loader); keyboard, mouse, touch and gamepad |
+| Rendering | `starhermit:scene` (three.js-like) draws the chart table, sea and pieces; every menu, HUD, form and overlay is `starhermit:ui` (immediate mode) over the scene, styled from `assets/ui-style.json` |
 
 **File map (real files).**
 
 | Path | Responsibility |
 |---|---|
-| `index.html` | Entry: `<canvas id="scene">`, `#label-layer` (projected A–J / 1–10 labels), `#ui`, live regions, caption line, import map (`three`, `three/addons/`), `<noscript>`; classic scripts game-options → ui-scale → browser-guard → starhermit-sdk → sh-language → `src/i18n/strings.js` → `strings-content.js` → `i18n.js`, then the `src/main.js` module |
-| `src/main.js` | Boot: WebGL check, save load/migrate, StarHermit init (account nickname, cloud-save mirror + sync status, settings KV, key bindings), audio unlock, visibility pause, `?demo` capture mode, `window.__fleet` test handle |
+| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, `cover=cover.jpg`, `launch=index.html`, `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.17.0`, `engine.minor=19`, `engine.capabilities=platform,storage,clipboard`, `control.*` + `engine.gamepad.*` for every action, `engine.group.*` headings |
+| `index.html`, `starhermit-files.json` | The engine's web loader (pins engine 1.17.0 on wiki.starhermit.com by hash) and the package file index, both written by `npm run package` (`starhermit package --web .`); never edited by hand |
+| `native/main.ts` | Entry: start-up (language, styles, platform, look, sounds), the fixed 60 Hz game clock, key/pad actions, pointer and touch on the chart (tap = pick, drag = orbit), the frame loop |
+| `native/app.ts` | Controller (the browser build's `App` without its DOM): screens, match lifecycle (placement editor, countdown, battle, AI pump, hot-seat handover, lessons, results, progression, achievements, local board, leaderboard post, resume), toasts/captions/announcements; timers on the game clock |
+| `native/screens.ts` | Every screen, dialog and the match HUD on `starhermit:ui` (title, setup, Journey, Challenges, Learn, Hosted Table lobby, profile, pause, settings, help, reset, handover, results; top bar, rails/drawers, tray, countdown, toasts, captions, the chart's A–J / 1–10 labels and note marks) |
+| `native/render.ts` | The 3D scene: table, sea (WGSL water), sonar sweep (WGSL), stars, buoys, holo grids, procedural hulls, markers, draft/preview hulls, particle pools, shot arcs, ripples, camera poses/springs/orbit/top-down/shake, picking, post effects per graphics level |
+| `native/quality.ts` | The runtime's quality tier (`frame().quality`) and level → the old presets' effect table and per-preset budgets |
+| `native/audio.ts` | The 21 one-shot clips and the looped sea bed (`starhermit:audio`), captions per cue |
+| `native/platform.ts` | Save document in `saves` (account-synced, merged on conflicts, the browser build's foreign cloud save migrated), match snapshot in device `storage`, game options in `settings` (legacy account keys migrated), player/invite link, server clock, high-score posting through `score-script.js` |
+| `native/i18n.ts`, `native/style.ts` | Language from the runtime's interface language; the converted style sheet, theme tokens and colour-vision palettes |
 | `src/rules/engine.js` | Pure rules: fleets, grids, mechanics, `createMatch`, `validatePlacement`, `autoPlaceFleet`, `listLegalActions`, `applyCommand`, scoring, tie-breaks, stars, hashing, serialization/migration, replay envelope |
 | `src/rules/ai.js` | Deterministic AI (`chooseCommand`) at easy/medium/hard and the human `suggestTarget` hint |
 | `src/rules/rng.js` | FNV-1a `hashString`, Mulberry32 `makeRng` with `fork`, `resumeRng` |
-| `src/session/session.js` | `GameSession`: command ids, undo snapshots, AI streams, replay recording, elapsed time, results, serialize/restore |
-| `src/content/stages.js` | 5 themes, 40 Journey stages, 8 Challenges, `dailyStage(date)`, `validateStage` |
-| `src/content/tutorial.js` | 5 Learn lessons (engine configs + wait-for steps) |
-| `src/platform/save.js` | Checksummed localStorage document, v1→v2 migration, `mergeSaves` / `combineSaves`, local leaderboard, 5 achievements |
-| `src/platform/starhermit.js`, `starhermit-sdk.js` | Hosted-platform facade over the shared StarHermit SDK: hosted flag, nickname, cloud-save mirror, settings sync, `DEFAULT_KEYS` bindings, sign-in and invite link |
-| `src/render/scene.js` | `FleetScene`: graphics settings (`setGraphics`, `graphicsInfo`), post chain, adaptive resolution, camera poses, procedural hulls (plain and detailed), water shader, particle pool, boards, ambient motion, pointer raycast, cosmetic jobs |
-| `src/render/gfx.js` | Pure graphics quality model: presets, categories, per-preset budgets (`BUDGETS`, `budget`, `particleCap`), hardware level → preset (`LEVELS`, `detectLevel`, `presetForLevel`, `detectPreset`), `resolve`, `choosePreset`, `presetTier`, `describe` |
-| `src/render/gpu-level.js` | Shared StarHermit hardware-level detector (`window.StarHermitGpu`; copy of the canonical tools file, not edited here) |
-| `src/audio/audio.js` | WebAudio buses, 22 sampled events with synth fallbacks, procedural music/ambience, caption sink |
-| `src/ui/app.js` | `App`: screens, HUD, tray, placement editor, battle input, keyboard/gamepad, results, pause, hotseat handover, resume |
-| `src/ui/gfx-i18n.js` | Settings → Graphics strings in 9 locales, `pickGfxLocale` |
-| `src/ui/platform-i18n.js` | StarHermit account strings (sign-in, invite, toasts, sign-out notice) in 9 locales |
-| `sh-language.js`, `src/i18n/` | Game language: the shared StarHermit language resolver (unmodified copy of `tools/sh-language.js`); `strings.js` (UI) and `strings-content.js` (stages, briefings, challenges, lessons, achievements, ships, captains) translation tables; `i18n.js` engine (`window.FSI18N`, DOM observer, `fs-language` event); `t.js` module helpers `T` / `N` / `pname` |
-| `src/ui/styles.css` | Layout, responsive rules, accessibility modes, palette tokens |
+| `src/session/session.js` | `GameSession`: command ids, undo snapshots, AI streams, replay recording, elapsed time (on an injected clock, `setSessionClock`), results, serialize/restore |
+| `src/content/stages.js`, `src/content/tutorial.js` | 5 themes, 40 Journey stages, 8 Challenges, `dailyStage(date)`, `validateStage`; 5 Learn lessons |
+| `src/platform/save.js`, `src/platform/options.js` | Checksummed v2 save document, v1→v2 migration, `mergeSaves` / `combineSaves`, local board, 5 achievements; the foreign-save reader, `mergeDocs`, the game options and the browser build's settings keys |
+| `src/i18n/strings.js`, `strings-content.js`, `core.js`, `src/ui/platform-i18n.js` | Translation tables (9 locales), the lookup (`createI18n`, `matchLocale`), the account strings |
+| `tools/ui-style.css` → `assets/ui-style.json` | The old `styles.css` rewritten class-based, converted with `npm run css` (`starhermit css`) |
 | `score-script.js` | StarHermit platform script (`server=`): range-checks a finished ranked match's total and posts it to the `high-score` leaderboard (canonical copy in the games repo's `tools/score-script.js`) |
-| `server.js` | Authoritative session module (`createSession`, `handleMessage`, `checkDeadline`, `getSnapshot`, `sessionSummary`); doubles as a dev static host when run directly |
-| `assets/` | `key-art.webp`, `results-win.webp`, `results-lose.webp` (FLUX.2 klein) |
+| `server.js` | Authoritative session module (`createSession`, `handleMessage`, `checkDeadline`, `getSnapshot`, `sessionSummary`) used by the unit tests; a dev static host when run directly (not packaged) |
+| `assets/` | `key-art.webp`, `results-win.webp`, `results-lose.webp` (FLUX.2 klein), `ui-style.json` |
 | `sfx/` | 22 Opus clips, `manifest.txt` (canonical), `manifest.json` (generator input), `manifest.md` (generated) |
-| `vendor/addons/` | Three.js r160 (0.160.1) addons: EffectComposer, RenderPass, ShaderPass, OutputPass, GTAOPass, UnrealBloomPass, SMAAPass, FXAAShader, RoomEnvironment and their shader/math dependencies |
-| `tests/run.js` | unit/property/fuzz/golden tests (`npm test`, followed by `tests/platform.test.mjs` and `tests/i18n.test.mjs` with `tests/i18n-common.mjs`) · `tests/e2e.mjs` Playwright playthrough · `tests/ai-restart.mjs` AI-pump regression · `tests/smoke.html` legacy in-browser suite |
-| `starhermit.txt` | `name=Fleet Signals`, `launch=index.html`, `server=score-script.js`, `cover=coverart.png` |
+| `tests/` | `run.js` (rules/content/session/server), `save.test.mjs`, `i18n.test.mjs`, `native.mjs` + `native/*.play` (engine checks) |
+| `tools/` | `package-web.mjs`, `css.mjs`, `gen-plays.mjs` (play scripts from the rules), `browser-play.mjs` (GPU browser check) |
 
 ## 2. Vision and design pillars
 
@@ -52,7 +50,7 @@
 2. **Deduction, not dice.** The only randomness is the seeded mine layout and the AI's cell choice among equally good candidates. Rules in: seed shown on setup and results, hint = the hard AI's own pick, replay envelopes with per-step hashes. Rules out: hidden modifiers, luck-based damage, cosmetic RNG touching rules (`rng.js` forks separate streams).
 3. **One ship at a time.** Each mechanic (shot limit, mines, salvo, spacing, fog) is introduced alone in Journey, combined with one known mechanic, then tested at a mastery stage. Rules in: `STAGES` follow the 5-stage cadence with a `mastery: true` capstone every fifth stage. Rules out: stages that stack a new mechanic on top of an untaught one; easy AI on a mastery board (`validateStage` rejects it).
 4. **Table-top calm, arcade punctuation.** The scene is a quiet bridge at night; shots are the only loud moments. Rules in: camera moves only between phases via critically damped springs, shake only on hits/sunk/mines, particles capped per tier. Rules out: idle screen shake, continuous VFX, music louder than the sea.
-5. **Nothing the bot can't reach.** Every action has a visible button or key and the e2e test plays a full match through them. Rules in: the tray exposes Fire/Note/Hint/Undo/Skip; the Hosted Table works without a network. Rules out: gestures with no button equivalent, hover-only information.
+5. **Nothing the bot can't reach.** Every action has a visible button or key and the play scripts (tests/native) play a full match through them. Rules in: the tray exposes Fire/Note/Hint/Undo/Skip; the Hosted Table works without a network. Rules out: gestures with no button equivalent, hover-only information.
 
 ## 3. Player experience
 
@@ -76,7 +74,7 @@
 
 **Resolution order (`applyCommand`).** Validate shape and player → duplicate `cmd.id` returns `{duplicate:true}` without change → dispatch → record id (cap 512) → `tick += 1` (annotate subtracts one, so notes never advance the clock). `cmdPlace` validates via `validatePlacement` (reasons `placement-shape`, `-out-of-bounds`, `-overlap`, `-mine`, `-adjacency`) and `beginBattleIfReady` opens battle once every alive player is placed, advancing past a resigned opening seat. `cmdFire` checks phase, turn, alive, target, bounds, repeat cell (`cell-already-targeted`); then hit/sunk bookkeeping, mine (`shotsUsed += 2` total), elimination when all target ships are sunk, victory when one player remains (`fleet-destroyed`), move-limit exhaustion when every living player is at the cap (`move-limit`, ranked by fully-hit sunk ships → hits → fewer shots), then `pendingShots -= 1` and `advanceTurn` (skips dead and shot-capped players). `cmdResign` removes the seat and finishes with reason `resign` when one remains. Rejected commands increment `invalidActions` on the actor (except unknown target / malformed annotate).
 
-**Scoring (`SCORE_TABLE`, `scoreMatch`).** win 500 · hit 25 each · sunk 100 each (only ships whose every cell the scorer hit) · accuracy `round(300 × hits/shots)` · shots spared 10 each (move-limit charts, winner only) · invalid −15 each. Worked example (desktop e2e run): victory, 17 hits in 41 shots, 5 ships sunk → 500 + 425 + 500 + round(300 × 0.4146 = 124.4) = **1549**. Stars (`starRating`): 0 on loss; 1 for the win, +1 at or under stage `par` shots, +1 at ≥ 60 % accuracy.
+**Scoring (`SCORE_TABLE`, `scoreMatch`).** win 500 · hit 25 each · sunk 100 each (only ships whose every cell the scorer hit) · accuracy `round(300 × hits/shots)` · shots spared 10 each (move-limit charts, winner only) · invalid −15 each. Worked example (a desktop run): victory, 17 hits in 41 shots, 5 ships sunk → 500 + 425 + 500 + round(300 × 0.4146 = 124.4) = **1549**. Stars (`starRating`): 0 on loss; 1 for the win, +1 at or under stage `par` shots, +1 at ≥ 60 % accuracy.
 
 **Tie-breaks (`compareResults`).** Higher score → winner over loser → fewer invalid actions → lower elapsed ms → session id string order.
 
@@ -101,36 +99,40 @@
 
 ## 6. Controls and interaction
 
-| Input | Placement | Battle | Everywhere |
+Actions are the manifest's (`control.<action>` with default keys, `engine.gamepad.<action>` with pad defaults); players rebind them in the runtime's Options › Controls. The browser build's action names (`cursorLeft`, `autoDeploy`, …) were not lower-case, so keys rebound in the old build start from these defaults.
+
+| Action (key / pad) | Placement | Battle | Elsewhere |
 |---|---|---|---|
-| Tap / click a cell | place selected ship's bow (or pick up a placed ship) | first tap arms the cell (target-lock sound, ring cursor), second tap or Fire commits; in Note mode cycles flag → unknown → clear | — |
-| Drag on canvas (>10 px) or press >600 ms | orbit camera (clamped ±0.35 rad yaw, −0.2..0.25 pitch); never a pick | same | reduced motion disables orbit |
-| Arrow keys | move cursor and preview | move cursor | — |
-| Enter / Space | place at cursor | arm / fire at cursor | activate focused button |
-| R | rotate draft ship | — | — |
-| A | Auto-deploy draft | — | — |
-| N | — | toggle Note mode | — |
-| H | — | hint (when assists allow) | — |
-| U | — | undo (practice) | — |
-| C | reset camera orbit | reset camera orbit | — |
-| Esc | open/close pause menu | same | closes pause; other overlays keep their own buttons |
-| Gamepad | stick/D-pad moves cursor (180 ms repeat), A picks, B clears selection, Start pauses | same | connection toast |
+| Tap / click a cell | place the selected ship's bow (or pick up a placed ship) | first tap arms the cell (target-lock sound, ring cursor), second tap or Fire commits; in Note mode cycles flag → unknown → clear | — |
+| Drag on the chart (>10 px) or press >600 ms | orbit camera (clamped ±0.35 rad yaw, −0.2..0.25 pitch); never a pick | same | reduced motion disables orbit |
+| `left/right/up/down` (arrows; D-pad / left stick) | move cursor and preview | move cursor | — |
+| `confirm` (Enter, Space, Numpad Enter; South) | place at cursor | arm / fire at cursor | a focused widget takes it |
+| `cancel` (Backspace; East) | — | clear the armed cell | — |
+| `rotate` (R; North) | rotate draft ship | — | — |
+| `auto_deploy` (A; Select) | Auto-deploy draft (focus then moves to Confirm deployment, so Enter confirms) | — | — |
+| `notes` (N; RB) | — | toggle Note mode | — |
+| `hint` (H; West) | — | hint (when assists allow) | — |
+| `undo` (U; LB) | — | undo (practice) | — |
+| `camera` (C; left stick press) | reset camera orbit | reset camera orbit | — |
+| `pause` (Escape; Start) | open/close the pause card | same | on a menu screen: back to the title |
 
-**Locking.** `inputLocked` is set while the AI thinks (`_pumpAI`), while a fire resolves (`_afterCommand` until the cosmetic job settles or Skip), during handover overlays and after finish; `paused` blocks scene callbacks and keys. Duplicate commits are prevented by command ids, not debounce timers.
+Menus and dialogs are `starhermit:ui`: Tab/arrows/Enter, pad focus and screen readers work everywhere; F1 opens the runtime's Options. The first gamepad shows the toast "Gamepad connected — stick aims, A confirms, B cancels."
 
-**Feedback per input.** Every button: `ui-press`/`ui-back` sample. Cell arm: `select` + green ring; illegal placement: red preview, `invalid` thud and a toast naming the constraint; rejected fire: toast from `_explainInvalid`; hint: sonar ping, cursor jump and toast; haptics (`navigator.vibrate` 10/40 ms) when the viewer's own board is hit and haptics are on.
+**Locking.** `inputLocked` is set while the AI thinks (`pumpAI`), while a fire resolves (until the cosmetic job settles or Skip), during handover cards and after finish; `paused` blocks picks and keys. The AI's pause (650–1050 ms), the countdown, the settle and the results delay are timers on the game clock (fixed steps), so they pause while the window is suspended and are deterministic in checks. Duplicate commits are prevented by command ids.
+
+**Feedback per input.** Every button: `ui-press`/`ui-back` sample. Cell arm: `select` + green ring; illegal placement: red preview, `invalid` thud and a toast naming the constraint; rejected fire: toast from `explainInvalid`; hint: sonar ping, cursor jump and toast; pad rumble (`vibrate` 10/40 ms) when the viewer's own board is hit and haptics are on.
 
 ## 7. Screens and UI flow
 
 `boot → title ⇄ {setup, journey, challenges, learn, lobby, profile, settings, help} → match(placement → countdown → battle ⇄ paused/handover → resolving) → results → {retry, next stage, title}`. Title also offers **Resume Match** when `fleet-signals-resume` holds a snapshot. Settings and Help opened from the pause menu are overlays over the still-mounted match (`_presentScreen`), never re-mounts.
 
-**Desktop (≥1024 px).** `hud-top` (pause, objective title/sub, turn badge), left rail (own fleet with hit pips, enemy summary), right rail (Signals log, last 12 lines), centred chart, bottom tray. Panels max 640 px (880 px wide variant), body text ≤ 70 ch.
-**Compact (<1024 px).** Rails become slide-in drawers toggled by ☰ / ≡ buttons in the HUD, capped at 45 vh.
-**Tray redraws.** The tray is redrawn only when its markup changes, never while a pointer is pressed on it (the redraw as a shot's animation settles waits for the release, so the click lands on the button it was pressed on), and keyboard focus on a tray button moves to the same control's new button.
-**Portrait mobile.** Tray scrolls horizontally in the thumb zone, objective subtitle hidden; title art strip ≤ 26 vh and results art ≤ 22 vh (hidden entirely under 560 px height).
-**Landscape mobile (≤500 px tall).** Rails 190 px, tighter HUD and tray padding.
-**Large screens (>1600×1000).** `ui-scale.js` sets `--ui-scale` (min(width/1600, height/1000), capped at 2.5; 2560×1440 → 1.44, 3840×2160 → 2.16); the `#ui` layer, caption line and FPS meter are CSS-`zoom`ed by it with their vw/vh lengths divided by it, so HUD, rails, tray, panels and toasts grow proportionally and the chart is re-fitted inside the larger HUD's safe rectangle; the full-screen canvas and the projected coordinate-label layer are not zoomed — the labels multiply their font size and offsets by the scale instead.
-**Safe areas.** `env(safe-area-inset-*)` offsets HUD, rails, tray, caption line and screens. Must never be cut off: the tray (Fire/Confirm), the pause button, the turn badge, the results total and buttons, and the A–J/1–10 labels the label layer projects each frame.
+**Wide (≥1024 logical px, taller than 500).** Top bar (pause ❚❚, objective title/sub, turn badge), left rail (own fleet with hit pips, enemy summary), right rail (Signals log, last 12 lines), centred chart, bottom tray. Panels max 640 px (880 px wide variant).
+**Compact (<1024 px).** Rails become drawers above the tray, toggled by ☰ / ≡ in the top bar, capped at 45 % of the height (scrolling inside).
+**Portrait phone (≤700 px wide, upright).** Two-row top bar (pause + objective, then turn badge and drawer toggles; the objective's subtitle hidden); the tray wraps its buttons into rows with Confirm deployment / Fire on a full-width row of its own at the bottom (the browser build scrolled the ship chips horizontally); title and results art hidden under 560 px tall.
+**Short landscape (≤500 px tall).** Rails/drawers 190 px, tighter top bar and tray padding.
+**Scale and safe areas.** The runtime's interface size and text size scale the whole UI (the old `ui-scale.js`); layout runs inside `frame().safeArea`. The chart is fitted (camera distance along each pose) inside the rectangle the top bar, rails and tray leave.
+**Coordinate labels and notes.** A–J above the target board's first row and 1–10 left of its first column are drawn each frame at the cells' projected window positions (the old projected label layer); private notes draw as ⚑ (flag) / ? (unknown) over their cells (the browser build stored notes but never drew them).
+Settings, Help and the reset confirmation are dialogs over the current screen (the match stays mounted under Pause › Settings / Help).
 
 ## 8. Art direction
 
@@ -138,7 +140,7 @@
 
 **Shape language.** Hulls are extruded low-poly plans (tapered bow, deck strip, tower and mast from size 3) sized `0.86 × cells`; with Model detail on, hulls are bevelled with curved bows, vertex-coloured decks, superstructure, bridge glass, funnel, mast and one or two twin-barrel turrets (the size-5 carrier gets a flight deck and an offset island) in a clearcoated physical material; own ships steel grey `0x8a97a8`, drafts and holo ships in the theme's `holoShip`, wrecks charred `0x3a2f2f` with ember emissive `0xff3300`. Markers: hit = four-sided orange spear `0xff7a3c` (emissive 2.0, so it blooms); miss = white ring `0xcfe8ff`; mine = violet octahedron `0xc26bff`; cursor/valid = teal `0x6ff2c8`; invalid = red `0xff5468`.
 
-**Palette (CSS tokens in `styles.css`).** `--accent #59e6ff`, `--bg #0a1626`, `--panel rgba(10,24,40,.88)`, `--panel-solid #0d1c30`, `--text #e8f2fa`, `--text-dim #9db4c6`, `--danger #ff5468`, `--ok #6ff2c8`, `--warn #ffc857`, `--hit #ff7a3c`, `--miss #cfe8ff`. High contrast: accent `#00e5ff` on `#000`, white text, 2 px borders. Colour-vision palettes re-hue hit/miss (deuteranopia `#ffd23c/#7cc7ff`, protanopia `#ffd23c/#9ad5ff`, tritanopia `#ff5ea8/#d8f4ff`) while shapes stay distinct.
+**Palette (tokens in `tools/ui-style.css`).** `accent #59e6ff`, `bg #0a1626`, `panel #0a1828e0`, `panel-solid #0d1c30`, `text #e8f2fa`, `text-dim #9db4c6`, `danger #ff5468`, `ok #6ff2c8`, `warn #ffc857`, `hit #ff7a3c`, `miss #cfe8ff`; the visual theme replaces accent/bg/panel/text. High contrast is the runtime's (Options). Colour-vision palettes re-hue the hit and miss tokens and the chart's hit spears and miss rings (deuteranopia `#ffd23c/#7cc7ff`, protanopia `#ffd23c/#9ad5ff`, tritanopia `#ff5ea8/#d8f4ff`; the browser build only changed the CSS tokens) while shapes stay distinct.
 
 **Themes (`THEMES`, per-stage and user-selectable).**
 
@@ -150,29 +152,22 @@
 | umbral-violet | #b58af0 / #0d0816 / #1a1030 / #e6dcf5 | #120a24 · #2a1a4a · #170e2e · #241640 · #5a3a9a · #c9a2ff · #e8d8ff |
 | glacier-front | #7ec8f0 / #0b141c / #14242e / #e2eef4 | #0e2230 · #2a4a5e · #33505f · #9fb8c4 · #4a8aa8 · #a8e0f8 · #f0f8ff |
 
-**Typography.** System stack ("Segoe UI", system-ui, -apple-system); title 2.6 rem tracked 0.08 em with an accent glow; `--font-scale` 1.25 under Larger text.
+**Typography.** The runtime's system-ui faces; title 41.6 px tracked with an accent glow (scaled down on narrow windows); larger text is the runtime's text size option.
 
 **Lighting.** ACES filmic tone mapping, exposure 1.18, sRGB output (the water, particle and sonar shaders include the tone-mapping and colour-space chunks, and the water takes scene fog); one warm directional key (`0xfff2dd`, 2.6) whose PCF soft shadow box is fitted to the table and both boards, plus a hemisphere fill (`0x8fb7d9` / `0x1a2433`); fog and `scene.background` take the theme's `fog`.
 
-**Graphics.** Optional effects: key-light shadows from ships and markers onto the table and grid slabs; GTAO ambient occlusion for contact darkening; bloom limited to emissive highlights (threshold 0.86: the table rim, hit spears, mines, shell tracer, shot sparks and buoy lamps); a colour grade (gentle S-curve, +10 % saturation, cool shadows / warm highlights) with a vignette; FXAA, SMAA or a 4× multisampled target; image-based reflections from a PMREM-filtered `RoomEnvironment` (`envMapIntensity` 0.32 scaled per material); detailed sea (the budget's 96–192 segments, two-layer chop on the normal for glitter, a broad sheen and the table's cyan glow on the swell) or simple sea (48 segments); particles low (600-point pool) or high (3200, both × the budget's sparks factor, plus sparks and slow embers on hits and fine spray on misses); ambient motion (a sonar sweep across the chart, bobbing buoys with blinking lamps, breathing grid lines, smouldering wrecks — stopped under reduced motion); model detail (detailed hulls, an engraved chart overlay with range rings, bearing ticks and N/E/S/W, brushed-metal pedestal). Settings → **Graphics** offers Quality (Auto (detected: <tier>), Low, Balanced, High, Ultra; Auto comes from the StarHermit hardware level below), a render scale slider (50–200 % of the preset's scale), one select per effect — Shadows (off/low/medium/high = 0/1024/2048/4096 map), Ambient occlusion (off/on/high), Bloom, Color grade, Anti-aliasing (off/FXAA/SMAA/MSAA), Reflections, Sea detail, Particles, Ambient motion, Model detail — each defaulting to "From preset (<tier>)", Adaptive resolution (on by default: over 90-frame windows, average > 26 ms steps the scale down 0.1 to a floor of 0.6, < 14 ms steps back up 0.05 to 1) and Show frame rate (a `#fps-meter` readout, pointer-events none, mid-left on compact layouts and above the tray on desktop), plus a summary line "GPU · Level N · cost summary · W×H px" (the level label localized) and a note when post-processing is unavailable. Presets: Low = scale 0.85, DPR cap 1, everything off, simple sea, low particles, still background, plain models (the composer is skipped, so Low costs what the old low tier did); Balanced = DPR 1.5, 1024² shadows, bloom, grade, FXAA, reflections, detailed sea/particles/motion/models; High = DPR 2, 2048² shadows, GTAO, SMAA; Ultra = scale 1.25, 4096² shadows, high-quality GTAO, MSAA. Choosing a preset clears the per-effect overrides (render scale and toggles stay). Changes apply live (shadow map, materials recompiled, water and particle pools rebuilt, ships re-synced for the hull set, post chain rebuilt on the next frame) and persist in the save document as `settings.graphics`; a save from before the panel maps its old `qualityTier` onto a preset once. The canvas and `<body>` carry `data-gfx-preset`. Pixel ratio = min(devicePixelRatio, preset cap) × preset scale × render scale × adaptive scale. If the post chain throws, the game renders directly and the panel shows the note; the renderer never logs to the console.
+**Graphics.** The runtime owns the graphics level (Options › Graphics: Auto or a level, quantum … infinite), render scale and pixel-ratio cap, adaptive resolution, the frame-rate limit and readout, and the largest shadow map; `native/quality.ts` maps the level's tier (`frame().quality`) onto the browser build's presets. Optional effects per tier: key-light shadows from ships and markers onto the table and grid slabs; ambient occlusion (`renderer.ao`, the old GTAO settings) for contact darkening; bloom limited to emissive highlights (`renderer.bloom`, threshold 0.86: the table rim, hit spears, mines, shell tracer, shot sparks and buoy lamps); a colour grade (`renderer.grade` in display space: gentle contrast, +10 % saturation, cool shadows / warm highlights, vignette); FXAA, SMAA or MSAA (`renderer.antialias`); image-based reflections from a PMREM-filtered `RoomEnvironment` (`envMapIntensity` 0.32 scaled per material); detailed sea (the budget's 96–192 segments, two-layer chop on the normal for glitter, a broad sheen and the table's cyan glow on the swell) or simple sea (48 segments); particles low (600-point pool) or high (3200, both × the budget's sparks factor, plus sparks and slow embers on hits and fine spray on misses); ambient motion (sonar sweep, bobbing buoys with blinking lamps, breathing grid lines, smouldering wrecks — stopped under reduced motion); model detail (detailed hulls, the engraved chart, brushed-metal pedestal). Low = everything off, simple sea, low particles, still background, plain models, Lambert materials; Balanced = 1024² shadows, bloom, grade, FXAA, reflections, detailed sea/particles/motion/models; High = 2048² shadows, AO, SMAA; Ultra = 4096² shadows, high AO, MSAA. Gameplay is identical at every level. The old per-effect overrides of Settings › Graphics are gone with the panel.
 
-**Hardware level and Auto.** `src/render/gpu-level.js` (the shared StarHermit detector, `window.StarHermitGpu`, loaded as a classic script before `src/main.js`) rates the GPU 0–20 (0 = Galaxy S20 / Intel UHD or weaker, 20 = RTX 5090, each level ≈ 1.23× the one below; laptop parts two levels lower; phones, tablets and ≤ 4 GB machines capped at 9; software renderers 0). Auto picks **Low from 0, Balanced from 4, High from 10, Ultra from 17**, so strong desktop GPUs get Ultra; adaptive resolution still steps down when frames are slow. On phones and tablets the shared frame-rate option paces Auto at half the display refresh rate and starts at 16 simultaneous sounds.
+**Per-tier budgets** (`BUDGETS` in `native/quality.ts`, the browser build's 60 FPS budgets; sparks scale within the tier by the level index, ≤ 2×).
 
-**Per-preset budgets** (`BUDGETS` in `src/render/gfx.js`; each tuned to hold 60 FPS on the weakest GPU Auto gives it — Low: level 0 phones / Intel UHD, Balanced: level 4 Iris Xe, High: level 10 GTX 1070, Ultra: level 17 RTX 4080). Gameplay is identical on every preset.
-
-| Preset | Table, buoys, ships | Detailed own hulls | Chart texture | Brushed pedestal | Detailed sea segments | Round-geometry LOD | Sky dust | Sparks (× counts and pool) | Screen/overlay backdrop | Bloom / GTAO resolution |
+| Tier | Table, buoys, ships | Detailed own hulls | Chart texture | Brushed pedestal | Detailed sea segments | Round-geometry LOD | Sky dust | Sparks | Screen backdrop | Bloom / AO resolution |
 |---|---|---|---|---|---|---|---|---|---|---|
 | Low | Lambert | Lambert | 512 px | 256 px | 48 | ½ | 200 | 0.5× | opaque, no blur | ½ / ½ |
 | Balanced | Standard | Standard | 512 px | 512 px | 96 | ¾ | 300 | 0.75× | opaque, no blur | ½ / ½ |
 | High | Standard | clearcoated Physical | 1024 px | 512 px | 144 | 1 | 400 | 1× | frosted (blur) | ½ / ½ |
 | Ultra | Standard | clearcoated Physical | 2048 px | 1024 px | 192 | 1.5 | 700 | 1.5× | frosted (blur) | full / full |
 
-Sparks scale within the preset by the hardware level (`StarHermitGpu.scaleBudget`, ≤ 2×; fewer below the floor). Textures, LOD geometry (pedestal, rim, glass, chart and sweep discs), the sea grid, sky dust and the particle pool are rebuilt when the preset changes and ships are re-synced with the new material class; Low swaps the pedestal, buoys and lamps for Lambert twins. The full-screen backdrop blur behind dimmed screens and overlays is re-composited every frame over the moving 3D view, so it is reserved for High/Ultra (`body.gfx-hud-blur`). Bloom and GTAO run at a fraction of the frame through a wrapped pass `setSize`.
-
-**60 FPS benchmark** (`node tools/gfx-bench.mjs fleet-signals [--mobile --presets low,balanced]`, dev-only, real GPUs; hook `tests/gfx-bench.mjs` picks the preset in Settings → Graphics, starts a Practice battle with Auto-deploy → Confirm and keeps firing through the H hint key and the Fire button, restarting from the results screen). Measured 2026-10-17 (an AMD Radeon iGPU at level 2 projected to each preset's floor level, the same page with draws skipped subtracted; typical p50 ≤ 12 ms and slow p90 ≤ 14 ms, CPU p90 ≤ 6 ms on the NVIDIA run):
-
-- Desktop 1920×1080: PASS low (typical 0.13, slow 0.34 ms at level 0; CPU 0.90 ms); PASS balanced (typical 2.88, slow 3.58 ms at level 4; CPU 1.10 ms); PASS high (typical 1.94, slow 2.70 ms at level 10; CPU 1.30 ms); PASS ultra (typical 3.46, slow 4.02 ms at level 17; CPU 1.30 ms).
-- Mobile 390×844 @3×: PASS low (typical 0.00, slow 0.00 ms at level 0; CPU 0.80 ms); PASS balanced (typical 0.00, slow 0.00 ms at level 4; CPU 0.90 ms).
+**Engine notes.** The water and sonar ShaderMaterials are WGSL with the old math (the water's vertex hook keeps the old shader's object-space wave field); particles are three `PointsMaterial` pools by size class with a soft round dot, fading by colour (additive) where the old point shader shrank them; light intensities are r160's ÷ π; the table's glass top draws before the holo grids (render order).
 
 **Motion.** Camera: critically damped springs (k = 42), interruptible; shot: 0.55 s parabolic projectile then particles (26 miss / 55 hit / 70 mine / 90 sunk, additive points), a water ripple and tiered shake (0.55 hit, 1.0 sunk/mine). Skip ▸▸ settles every job. Reduced motion: no countdown, 0.12 s shots, no shake, no orbit gesture, instant camera cuts, CSS animations at 0.01 ms. Quality is governed by the Graphics presets (see **Graphics** above).
 
@@ -180,7 +175,7 @@ Sparks scale within the preset by the hardware level (`StarHermitGpu.scaleBudget
 
 ## 9. Audio direction
 
-**Mix.** Four gain buses into a master mute: `music` (default 0.7, currently silent — see §16), `effects` 0.9, `ambience` 0.6, `voice` 0.8. Every event has a procedural WebAudio fallback; the Opus sample is preferred once decoded (`SAMPLE_EVENTS`, lazy fetch after the first gesture). Ambience starts on the first pointer/key event: a filtered brown-noise sea bed with 6–12 s swells, replaced by the looped `sea-ambience.opus` crossfaded in over 2.5 s once decoded. Captions (`[impact — hit]` etc.) go to `#caption-line` when enabled. Hidden tab suspends the context.
+**Mix.** Clips play on the runtime's buses (Options › Audio owns the volumes and the mute): effects and the sea bed on `effects`, the button clicks on `interface`, with the old default levels folded in (effects 90 %, ambience 60 %). Every event plays its Opus sample once loaded (clips load one at a time once the mixer runs — natively at once, in a browser after the first press); the synthesized stand-ins the browser build played while a clip decoded are not ported, so a clip still loading is silent. The looped `sea-ambience.opus` starts once loaded. Captions (`[impact — hit]` etc., translated) show above the tray when Settings › Captions is on. A suspended window stops the bed. Music and voice buses carried nothing in the browser build and are not used.
 
 **SFX event table (source of `sfx/manifest.txt`).**
 
@@ -213,61 +208,54 @@ Sparks scale within the preset by the hardware level (`StarHermitGpu.scaleBudget
 
 Every player-facing string ships in nine locales: **en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT**.
 
-- **Tables.** English source strings are the keys. `src/i18n/strings.js` (UI) and `src/i18n/strings-content.js` (40 stage names and briefings, daily briefings, 8 challenges with their goals, 5 themes, 5 lessons, 5 achievements, ship classes, the AI captains and default seat names) hold rows of [English, es-419, de-DE, fr-FR, pt-BR, it-IT]; en-GB, es-ES and fr-CA list only their differences and otherwise fall back to en-US, es-419 and fr-FR. Settings → Graphics keeps its own table (`src/ui/gfx-i18n.js`) and the StarHermit account strings theirs (`src/ui/platform-i18n.js`); both read the game language. "Fleet Signals", "StarHermit", cell names (B4) and typed player names stay as they are.
-- **How it is applied.** The UI is built from HTML templates. `src/i18n/i18n.js` runs a MutationObserver over `<body>` that translates every text node and every `aria-label` / `title` / `placeholder` / `alt` whose whole English text is a key, remembers the key, and re-translates those nodes in place on a language change (subtrees marked `data-i18n-skip`, `<kbd>`, `<code>` and the projected coordinate labels are left alone). Text assembled at runtime goes through `T()` (placeholders such as `{name}`, `{cell}`, `{n}`) and re-renders on the `fs-language` event. The engine's battle log and score labels stay English inside the hashed, replayable state; `app.js` translates their fixed patterns when it renders the Signals log and the score breakdown.
-- **Settings → Language → Game language** (rendered by the shared `game-options.js` from the `sh-language.js` instance inside the Graphics fieldset) offers **Automatic — <resolved language>** plus the nine locales by native name, with a status line (Saved to account / Saved on this device / Account sync unavailable). It is reachable from the title's Settings button and from Pause → Settings during a match.
-- **Resolution** (`sh-language.js`): explicit game choice → for Automatic, the StarHermit account's `preferredLanguage` (`GET /api/v1/me/language`, signed in only) → `navigator.languages` → en-US. Tags map to the nearest shipped locale (`es-MX → es-419`, `en-AU → en-GB`, `fr → fr-FR`, `pt-PT → pt-BR`). The choice (`auto` or a locale) is stored per player in `localStorage['fleet-signals.language.<user|guest>']` and, when signed in, in the per-player settings key `ui.language` as `{ choice }`; a failed settings read never overwrites it and the game never writes the platform preference. Standalone play makes no language request. `?lang=<tag>` forces a locale for the page load (QA links) and hides the selector.
-- **Live switching.** A change applies immediately: `<html lang>` and all observed text update in place; in a match the objective, turn badge, rails, Signals log and tray re-render without touching the session (placement, shots, AI turn and undo stack are kept); on a menu the screen re-renders; Settings and Help redraw only what the game owns (the Graphics inner box), so the shared Language, frame-rate, Sound and Report sections stay mounted.
-- **Expansion.** Flex-wrapping menu rows and tray, 70 ch paragraph cap, `--font-scale` 1.25 mode, horizontally scrolling tray on portrait phones, 18-character name inputs. German at 390 px is checked by the e2e.
+- **Tables.** English source strings are the keys. `src/i18n/strings.js` (UI, audio captions) and `src/i18n/strings-content.js` (40 stage names and briefings, daily briefings, 8 challenges with their goals, 5 themes, 5 lessons, 5 achievements, ship classes, the AI captains and default seat names) hold rows of [English, es-419, de-DE, fr-FR, pt-BR, it-IT]; en-GB, es-ES and fr-CA list only their differences. The StarHermit account strings are `src/ui/platform-i18n.js`. "Fleet Signals", "StarHermit", cell names (B4) and typed player names stay as they are.
+- **How it is applied.** Code translates with `T()` / `N()` (`native/i18n.ts` over `src/i18n/core.js`); the immediate-mode UI redraws every frame, so a language change applies at once everywhere, a match keeping its state. The engine's battle log and score labels stay English inside the hashed, replayable state; `app.ts` translates their fixed patterns for the Signals log and the score breakdown.
+- **Language choice** is the runtime's (Options › Language: the player's choice, else the device's), mapped to the nearest shipped locale (`es-MX → es-419`, `en-AU → en-GB`, `fr → fr-FR`, `pt-PT → pt-BR`). The browser build's own selector, `?lang=` and its `ui.language` account key are gone (the key is removed from the account once read).
 
 ## 11. Accessibility
 
-- **Keyboard-only path.** Title → Play → Launch (Tab/Enter), A to auto-deploy, Tab to Confirm, arrows + Enter to fire, H for hints, Esc for pause; every overlay focuses its first control and `closeOverlay` restores the previous focus. `:focus-visible` is a 3 px amber outline.
-- **Screen reader.** `#live-polite` announces phase changes, turn, each shot ("You fire at C4 — a hit."), notes and hints; `#live-assertive` announces errors, sunk ships, eliminations and the result headline. Screens carry `role="main"` labels, the tray is a toolbar, stage cells and seats have explicit `aria-label`s, toggles use `aria-pressed`.
-- **Captions.** Settings → "Captions for meaningful audio" shows the caption line above the tray for every sound, music and ambience change.
-- **Contrast and colour.** Text `#e8f2fa` on `#0a1626`; High contrast mode goes to pure black/white with 2 px borders; three colour-vision palettes; hit/miss/mine also differ by shape and label.
-- **Motion.** Reduced motion honours `prefers-reduced-motion` on first boot and the toggle thereafter (see §8).
-- **Targets.** Buttons, inputs and chips are ≥ 44 px tall; tray gap 8 px; Left-handed mirrors the tray and drawer sides.
-- **Other.** Larger text (×1.25), haptics toggle, tutorial replay from Settings, no audio-only information.
+- **Keyboard / pad path.** Title → Play → Launch (Tab/Enter), A to auto-deploy (focus moves to Confirm deployment), Enter, arrows + Enter to arm and fire, H for hints, Esc for pause; dialogs focus their controls.
+- **Screen reader.** `ui.announce` (polite/assertive) speaks phase changes, turns, each shot ("You fire at C4 — a hit."), notes, hints, errors, sunk ships, eliminations and the result headline; containers carry labels (Match setup, Rules summary, Fleet status, Event log, Score breakdown, Results), stage cells and seats have explicit names, toggles are announced pressed.
+- **Captions.** Settings › Captions for meaningful audio shows a caption above the tray for every cue and the sea bed.
+- **Contrast, text size, reduced motion.** The runtime's options (high contrast, text size, reduced motion: no countdown, 0.12 s shots, no shake, no orbit gesture, instant camera cuts, no ambient motion). Three colour-vision palettes; hit/miss/mine also differ by shape and label.
+- **Targets.** Buttons and chips are ≥ 44 px tall; Left-handed reverses the tray and swaps the rails/drawers.
+- **Other.** Haptics (pad rumble) toggle, tutorial replay from Settings, no audio-only information.
 
 ## 12. StarHermit integration
 
-Conventions follow https://wiki.starhermit.com/. `src/platform/starhermit.js` is a thin facade over the shared client `starhermit-sdk.js` (loaded by `index.html` before the game modules; `main.js` calls `StarHermit.init()` before anything else). Without a launch token the game makes no network request.
+Conventions follow https://wiki.starhermit.com/ (engine tutorial). Standalone (signed out) the game makes no platform request beyond the runtime's own.
 
 | Feature | Status in this build |
 |---|---|
-| Manifest / launch | `starhermit.txt` with `name`, `launch=index.html`, `owner`, `server=score-script.js`, `cover`, and one `control.<action>` line per keyboard action |
-| Launch / auth | Hosted mode activates iff the SDK reads `#game_token=<jwt>[&session_id=]` (library launch) or `#access_token=<jwt>` (sign-in return); the fragment is stripped, `sub` / `game_scope` give the player and slug (never hard-coded), every call is same-origin with `Authorization: Bearer`, and the SDK renews the token before expiry. If renewal is refused the game toasts that progress keeps saving on this device, the profile shows Offline, and the title re-offers sign-in where available |
-| Sign-in | On `<slug>.starhermit.com` without a token the title shows **Sign in with StarHermit** (SDK redirect); hidden when signed in and when running locally |
-| Identity / profile | Hosted: profile nickname (`Player <id>` fallback; never `/api/v1/me`, never usernames) on the profile screen, adopted as the default local display name; offline: local guest profile only (`profile.name`, 18 chars) |
-| Invite link | Hosted: the title shows **Invite a friend**, copying the SDK share link to the clipboard with a toast |
-| Cloud save | Hosted: slot `game:<slug>` (`/api/v1/me/cloud-saves/game:<slug>`) read at boot through `StarHermit.loadJSON()` (an empty slot reads as null and is seeded from the local doc); a strict descendant wins (`mergeSaves`), otherwise both docs are merged field by field (`combineSaves`: union of cleared stages, challenges, dailies and achievements with the best stars/score, fewest shots and earliest unlock; the larger of each career counter; the union of local board entries; tutorial progress; this device's profile and settings); ~2 s debounce + `pagehide`/hidden flush, sync status on the profile screen; localStorage stays the offline cache. Writes after a read are conditional (ETag): when another device saved first the SDK refuses the write and emits `saveconflict`; the game reloads the cloud doc, merges it with `combineSaves`, adopts the merge locally and saves it again. A match in progress lives in its own resume snapshot and is untouched |
-| Language | Settings → Language follows the account's preferred language under Automatic and saves an explicit choice to `ui.language` (§10) |
-| Report a problem | Settings → **Report a problem** (signed in only, from `game-options.js`) files a bug report through `StarHermit.reportBug` with a small non-personal `context.json` (language, viewport, pixel ratio, FPS cap, audio limit, path); uncaught errors are filed as crash reports through `StarHermit.captureCrashes` (SDK-capped) |
-| Settings sync | Hosted: volumes, mute, graphics, reduced motion, high contrast, palette, larger text, left-handed, haptics, hold-to-confirm, captions, camera view and theme are patched into the settings KV (same keys as `save.settings`) whenever a persist changes them; at boot platform values are applied over local defaults |
-| Controls | Keyboard input is routed by `KeyboardEvent.code` through `StarHermit.loadBindings(DEFAULT_KEYS)`: `cursorLeft/Right/Up/Down`, `confirm`, `rotate`, `autoDeploy`, `notes`, `hint`, `undo`, `camera`, `pause`; Help lists the effective keys |
-| Leaderboards | local board in the save doc (score-desc, cap 100, with ruleset, content version, seed, assists, duration). Hosted: every finished Daily, Journey or Challenge match against the AI also posts its total through `StarHermit.submitScores` (a practice session whose `score-script.js` posts it to the platform `high-score` board — integer, higher is better, 0–1,000,000; negative totals post as 0) and the results panel shows "Posting score…", then "Leaderboard rank: #N" (or posted / not posted), localized in the nine locales (`src/ui/platform-i18n.js`). Practice, Learn and Hot-seat post nothing; offline shows no line and sends nothing |
-| Achievements | 5 static keys unlocked idempotently in the local save: `first-victory`, `sharpshooter`, `daily-streak-3`, `journey-mastery`, `long-voyage` |
-| Game script | `server.js` exports an authoritative session API (membership check, 4096-byte payload cap, 20 msgs / 10 s rate limit, idempotent command ids, 24 h turn deadlines with auto-resign, redacted `getSnapshot`, `sessionSummary`, result `{winner, reason, scores, finishedAt}`) used by the unit tests and the dev host; it is an ES module importing the rules engine, not a Jint `globalThis.game` script, so no platform session runs it (the platform runs `score-script.js`) |
-| Sessions / matchmaking / invites / chat / replays / voice | not used: there is no platform game script to run online matches (the only platform session is the score post's practice session); Hosted Table is local pass-and-play |
-| Server time / telemetry / presence | not used: Daily Signal uses the local UTC clock and nothing is sent |
+| Manifest / launch | `starhermit.txt` (see §1); the web loader `index.html` pins engine 1.17.0 |
+| Identity | `player()`: signed in, the profile shows "Signed in as <display name>" with the sync state; guests see Offline. The local display name (Profile, 18 chars) names your seat in matches |
+| Sign-in / invite | Title: **Sign in with StarHermit** (`requestSignIn`) when signed out; **Invite a friend** (the invite link, copied with `clipboard.writeText`) when signed in |
+| Cloud save | The v2 save document is the game's `saves` save (schema 2): on the device and in the account, uploads debounced by the runtime; a conflict merges both copies (`mergeDocs`: strict descendant, else `combineSaves`). The browser build's slot (`game:<slug>`, the JS SDK's `saveJSON` text) shows as foreign: it is read (v1 migrated), merged in and replaced once (`replaceForeign`). A match in progress is a device-only snapshot (`storage`, `fleet-signals-resume`). Old browser localStorage progress of guests does not migrate |
+| Settings | The game's options (theme, palette, left-handed, haptics, captions) are `settings` keys, synced with the account; the browser build's account settings keys are read once (`legacyKeys`), the five options adopted, all old keys removed. Volumes, mute, graphics, language, reduced motion, high contrast and text size are the runtime's Options |
+| Controls | Manifest actions; rebinding in the runtime's Options; Help lists the effective keys (`bindingLabel`) |
+| Server time | `serverNow()` (the device clock until the platform answers) dates the Daily Signal and the local board entries |
+| Leaderboards | Local board in the save doc (score-desc, cap 100). Signed in: every finished Daily, Journey or Challenge match against the AI posts its total through `score-script.js` (a practice session whose socket sends `{type:'result', scores:{'high-score': n}}`; the script range-checks 0–1,000,000) and the results card shows "Posting score…", then "Leaderboard rank: #N" / posted / not posted. Practice, Learn and Hosted Table post nothing; signed out shows nothing |
+| Achievements | 5 keys unlocked idempotently in the save document |
+| Hosted Table | Local pass-and-play on one device; nothing is recorded or posted (no server-refereed rooms) |
+| Session end | `onSessionEnded` shows the signed-out toast; play continues on the device |
 
 ## 13. Technical architecture
 
-- **Module contract.** Nothing mutates rules state except `applyCommand` via `GameSession.command`; `FleetScene.syncFromState` is the only path that sets board contents, and the UI re-syncs after every cosmetic job. UI state (`selectedCell`, `annotateMode`, drawers) is separate from match state.
-- **Determinism.** Same seed + command list ⇒ identical `hashState` (property-tested over 20 games); `rngCursor` keeps rules-stream calls order-stable; visual decoration uses `visualSeed 'fleet-signals-v1'`.
-- **Persistence.** `localStorage['fleet-signals-save']` (v2, FNV-1a checksum, migrated from v1, reset to defaults with `corrupted:true` on any mismatch) and `localStorage['fleet-signals-resume']` (serialized `GameSession` written after placement, every shot and undo; cleared on finish).
-- **Performance.** DPR capped per Graphics preset (1 / 1.5 / 2 / 2), render scale 0.85 on Low and 1.25 on Ultra, adaptive resolution, composer only when an effect needs it, sea 48 or the budget's 96–192 segments, particles 600 or 3200 × the budget's sparks factor, instanced grid lines and buoys, explicit disposal on `buildBoards`/`clearShips`, rendering and audio paused when the tab is hidden, WebGL context loss/restore handled.
-- **Server hosting.** `PORT=<n> node server.js` serves the folder with MIME types for js/css/webp/png/svg/opus/glb (its legacy `/api/v1/time` and 204 `/api/*` answers are no longer called by the client).
-- **Test hooks.** `window.__fleet = { app, scene, platform }` for synchronisation only; `app.aiDelay` pacing knob; `?demo` boots a deterministic mid-battle scene for captures.
+- **Module contract.** Nothing mutates rules state except `applyCommand` via `GameSession.command`; `render.syncFromState` is the only path that sets board contents, and the controller re-syncs after every cosmetic job. UI state (`selectedCell`, `annotateMode`, drawers) is separate from match state.
+- **Determinism.** Same seed + command list ⇒ identical `hashState`; visual decoration uses `visualSeed 'fleet-signals-v1'`; the game clock advances in 60 Hz fixed steps, so play scripts replay exactly.
+- **Frame.** `onFixedUpdate`: timers, toasts; `onUpdate`: the look for the graphics level, audio; `onRender`: the UI, then pointer presses (decided after the UI is built so a press over a widget is the widget's), then the scene (camera aspect, jobs, particles, ambient motion, camera).
+- **Performance.** Hull geometries cached per size and detail; instanced grid lines and buoys; pooled particles; canvas textures (chart, brushed metal) painted once per budget; the scene holds while the window is suspended.
 
 ## 14. Testing and acceptance criteria
 
-**`npm test` (`tests/run.js`, then `tests/platform.test.mjs`).** Graphics model: hardware level → preset (SwiftShader / llvmpipe / `Radeon Graphics` / UHD → Low, Iris Xe → Balanced, GTX 1070 → High, RTX 4080 / 5090 → Ultra, phones and tablets Balanced at most), the per-preset budget table and its level scaling, `resolve` with preset/override/invalid override/scale clamp, `choosePreset` clearing overrides, legacy tier mapping, Graphics strings present in all 9 locales. RNG determinism and forks; platform adapter on the real SDK with a stubbed fetch (token read and URL scrub, nickname and fallback, `game:<slug>` save round-trip and status with an `etag`-answering, `If-Match`-enforcing mock, settings apply/patch-on-change, key bindings, sign-out, sign-in offer on a UUID host, zero requests standalone, `combineSaves` keeping both devices' progress, a conditional write refused with 412 → `saveconflict`); `tests/i18n.test.mjs`: every key used in the templates, in `T`/`N` calls, the engine log/score patterns and the content is present in all nine locales with intact placeholders, no template text node mixes words with an interpolation, the locale follows `sh-language.js` and switches live, and the Graphics and account strings cover the nine locales; placement acceptance, overlap, bounds, noTouch, mine, double placement, auto-place legality on every stage config; fire hit/sunk/elimination/victory, not-your-turn, duplicate cell, bounds, self/dead target, mine cost, move-limit winner, salvo shots, fog identity, resign; annotate tick invariance; legal actions per phase and 3-player skirmish; placement-phase resignation deadlocks; score breakdown sums, tie-break order, stars; replay property (20 games), envelope tamper detection, serialization round-trip, v1/v2 migration, duplicate id idempotence; 4000-command fuzz; all 40 stages + 8 challenges validate, validator rejects illegal stage, daily determinism; AI termination at all difficulties and hard beats easy over 6 seeds; session results/undo/restore/hint; server lifecycle, redaction, duplicates, deadline; golden hashes for easy/medium/hard scripted sessions.
+**`npm test`** = `test:unit` + `test:native`.
+- `tests/run.js`: rules (placement, fire, mines, salvo, fog, move limit, resign, annotate tick invariance, legal actions, 3-player skirmish), scoring/tie-breaks/stars, replay property and tamper detection, serialization/migration, 4000-command fuzz, all stages/challenges validate, daily determinism, AI termination and strength, session results/undo/restore/hint and the injected clock, server lifecycle/redaction/duplicates/deadline, golden hashes, locale matching.
+- `tests/save.test.mjs`: the foreign cloud save read back (v2 and v1), merging, round-trips, option checks and the browser build's settings keys.
+- `tests/i18n.test.mjs`: every key in `native/*.ts`, the captions and the content is translated in all nine locales with intact placeholders and no unused rows; the lookup switches locales.
+- `tests/native.mjs`: translations, the web index matches the files, `tsc` (TypeScript 5.9, no skipLibCheck), `starhermit check .` with zero warnings, and every `tests/native/*.play` as a signed-out `--render-check`: `lesson-final` (Learn › Lesson 5 played to its Victory by the hint key; generated by `tools/gen-plays.mjs` from the rules), `deploy` (Lesson 1 placed by the cursor keys, first shot, pause, leave), `practice` (setup, Auto-deploy, hinted shot, Undo, a note flag, pause › Settings / Help, leave), `hosted` (two captains ready, deploy behind the handover card, first shot, handover), `menus` (Journey stage 1 launched, Daily and Challenge setups, Profile with the reset cancelled, Settings).
+- `npm run test:browser` (`tools/browser-play.mjs`): the packaged loader on loopback in Chrome on the AMD GPU (`~/games/tools/gpu-chrome.mjs`) at 1366×768, a phone 390×844 at DPR 3 and the phone sideways: Play, Launch, Auto-deploy, Confirm, a hinted shot, the fleet drawer (phone), pause; fails on console errors/warnings or the runtime's error screen. `~/games/tools/engine-web-smoke.mjs` checks start-up at desktop and phone.
 
-**`tests/e2e.mjs` (Playwright + system Chrome, `PORT` optional).** Desktop 1280×800 and mobile 390×844 touch passes: title → settings (reduced motion, deuteranopia palette applied) → practice setup (easy) → Auto-deploy + Confirm → first shot via H + Fire → Undo restores shotsUsed 0 → Note mode via keyboard → pause/resume, pause → help → done → resume, Esc toggling → battle played to a terminal result via hint + Fire → results rows ≥ 3 and save doc persisted → title. Hosted pass: add/drop/add seats keeps unique ids and starts a 3-seat match. The standalone passes assert no `/api` request; a signed-in pass (390×844, `#game_token=` with mocked platform routes) checks the token left the URL, synced music volume, sign-in hidden, the invite link copied through the visible title button, Help showing a platform rebinding, the nickname on the profile screen and the empty cloud slot seeded with a `game:<slug>` PUT. A Graphics step (both viewports) checks that Auto resolves to Low on the software GPU and the summary names Level 0, switches Low → High through the panel (summary shows SMAA, composer built), overrides Shadows to Off (shadow map disabled), turns on the frame-rate readout, checks no control overflows the viewport, reloads and confirms preset, override and toggle persisted, switches to Ultra, then back to Auto (overrides cleared). A **Language** pass at both viewports launches signed in with `GET /api/v1/me/language` answering `fr-CA`: the title resolves to French, Settings shows *Automatique — Français (Canada)*; choosing Italian re-renders Settings in place (the shared select stays mounted) and saves `ui.language`; *Report a problem* posts a bug report; German must fit the viewport in Settings, on the title and in the battle HUD; a practice match deployed in German keeps its session when switched to French from Pause → Settings (the pause menu, objective and tray re-render); Automatic returns to fr-CA. Screenshots land in `$SHOT_DIR` (default `/tmp`). Any `pageerror`, console error or console warning fails the run.
-
-**QA bar (checkable).** All modes reachable from the title; no console errors or warnings in either viewport; Fire/Confirm/pause/turn badge visible without scrolling at 390×844 and 1280×800; every implemented setting changes observable state; a new player is told what to do on every phase transition (announcements + tray labels + lesson toasts); every asset in §15 loads with HTTP 200 (`tools/audit_game_assets.py` PASS).
+**QA bar.** All modes reachable from the title; no console errors or warnings; Fire/Confirm/pause/turn badge visible without scrolling on phones and desktops; every setting changes observable state; a new player is told what to do on every phase transition.
 
 ## 15. Asset inventory
 
@@ -277,30 +265,18 @@ Conventions follow https://wiki.starhermit.com/. `src/platform/starhermit.js` is
 | `assets/key-art.webp` (1280×720, 48 KB) | title strip | FLUX.2 klein seed 7901, 28 steps | generated in this pass, wired |
 | `assets/results-win.webp` (1024×576, 42 KB) | results art on victory | FLUX.2 klein seed 7902 | generated in this pass, wired |
 | `assets/results-lose.webp` (1024×576, 21 KB) | results art on defeat/draw | FLUX.2 klein seed 7903 | generated in this pass, wired |
-| `icon.png`, `favicon.svg` | touch icon, tab icon | authored | shipped |
-| `vendor/three.module.js` | renderer | Three.js r160 (0.160.1) | shipped |
-| `vendor/addons/**` | post-processing passes, shaders, `RoomEnvironment` | Three.js 0.160.1 `examples/jsm` (same revision as the core) | shipped |
+| `icon.png` | touch icon | authored | shipped |
+| `cover.jpg` | StarHermit cover (manifest `cover=`) | built from the key art | shipped |
 | `sfx/*.opus` (16 originals: ui-press, ui-back, invalid-action, ship-place, rotate-tick, torpedo-fire, splash-miss, hull-hit, ship-sunk, mine-detonation, turn-chime, countdown-blip, victory-fanfare, defeat-motif, lesson-complete, achievement-sparkle) | event samples | MOSS-SoundEffect v2, 100 steps | shipped, wired |
 | `sfx/sea-ambience.opus`, `battle-stations.opus`, `target-lock.opus`, `sonar-hint.opus`, `fleet-eliminated.opus`, `chart-handover.opus` | new events (§9) | MOSS-SoundEffect v2, 100 steps | generated in this pass, wired |
 | 3D models / character animation | — | — | none by design (procedural hulls, no humanoid) |
 
 ## 16. Known limitations
 
-- **Hosted Table is local.** `server.js` implements the authoritative script and a dev static host but no WebSocket/REST transport, invitations, reconnect over a network or remote result reconciliation; "reconnect" today means Resume from the title screen.
-- **Stage `allowUndo` is not honoured.** Journey stage 4 ("Ink on the Chart") advertises undo, but `startMatch` enables undo only in Practice. Hints are likewise available only in Practice and Learn.
-- **Settings stored but inert:** `holdToConfirm`, `cameraView`, `avatar`; the `music` bus never plays because `startMusic` is not called; the `voice` bus has no content.
-- `tutorialFlags` on stages are data only; in-stage first-time hints come from the objective text and tray, not per-flag prompts.
-- Toasts stack at the top centre and can overlap the results art on phones when several fire in quick succession (rapid hint use).
-- Rendering fidelity and audio are not assessed by automation (SwiftShader, no gesture in headless Chrome); e2e verifies absence of errors only.
-- The platform board accepts any integer total in 0–1,000,000; the match itself is not re-simulated server-side.
-
-**Design intent not yet implemented.** Online Hosted Table through the StarHermit session API with the existing `server.js` contract; adaptive music stems on the music bus; honouring `allowUndo` from stage content; hold-to-confirm for Resign/Reset.
-
-## Browser interference
-
-`browser-guard.js` (loaded from `index.html`) suppresses browser UI that gets in the way of play: the right-click context menu, the iOS long-press callout, copy / cut / paste, and page text selection. Text fields (inputs, textareas, selects, contenteditable) keep normal selection, context menu and clipboard behaviour.
-
-
-## Sound and frame-rate options
-
-The options panel includes Sound controls for master, music, effects and UI volume, a mute that preserves volume levels, and an Auto or manual concurrent-sound limit (1–64). Changes apply immediately with perceptual volume curves. A shared allocator bounds Web Audio and media playback, including loops and scheduled sources. Graphics includes Auto display refresh or a custom maximum frame rate from 1–1000 FPS; rendering is paced independently of simulation and input. Preferences persist locally, with FPS stored per detected GPU, and reconcile with Starhermit settings when signed in. The controls support keyboard and touch input and the supported English, Spanish, German, French, Portuguese and Italian locales.
+- **Hosted Table is local.** Pass-and-play on one device; there are no online rooms, so (per the platform's server-authoritative results policy) hosted matches are not recorded or posted. `server.js` keeps the authoritative session contract for a future server-refereed room.
+- **Solo scores are client totals.** `score-script.js` range-checks the posted total (0–1,000,000); the match is not re-simulated server-side.
+- **Stage `allowUndo` is not honoured.** Journey stage 4 ("Ink on the Chart") advertises undo, but undo is enabled only in Practice; hints only in Practice and Learn (pre-existing; kept for score compatibility).
+- **Dropped with the browser build:** hold-to-confirm, the camera-view and avatar settings (stored but inert there); the music and voice buses (never played); the synthesized sound stand-ins while clips load; the old Settings › Graphics per-effect overrides and the in-game Language / Sound / Report sections (the runtime's Options now); guests' browser localStorage progress.
+- `tutorialFlags` on stages are data only.
+- Toasts stack at the top centre and can overlap the chart on phones when several fire in quick succession.
+- The mergeSaves progress-count heuristic can prefer one copy outright when its counters all dominate (pre-existing behaviour).
