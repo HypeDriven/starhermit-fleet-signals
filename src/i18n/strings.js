@@ -105,7 +105,6 @@
     ['Progress mirrors to your StarHermit cloud save; this device keeps an offline copy.', 'El progreso se refleja en tu guardado en la nube de StarHermit; este dispositivo conserva una copia sin conexión.', 'Der Fortschritt wird in deinen StarHermit-Cloud-Spielstand gespiegelt; dieses Gerät behält eine Offline-Kopie.', 'La progression est copiée dans votre sauvegarde StarHermit en ligne ; cet appareil garde une copie hors ligne.', 'O progresso é espelhado no seu save na nuvem do StarHermit; este dispositivo mantém uma cópia offline.', 'I progressi sono copiati nel tuo salvataggio cloud StarHermit; questo dispositivo ne tiene una copia offline.'],
     ['Offline', 'Sin conexión', 'Offline', 'Hors ligne', 'Offline', 'Offline'],
     ['Progress is stored on this device only.', 'El progreso se guarda solo en este dispositivo.', 'Der Fortschritt wird nur auf diesem Gerät gespeichert.', 'La progression est enregistrée sur cet appareil uniquement.', 'O progresso fica salvo só neste dispositivo.', 'I progressi restano solo su questo dispositivo.'],
-    ['loading…', 'cargando…', 'lädt …', 'chargement…', 'carregando…', 'caricamento…'],
     ['saving…', 'guardando…', 'speichert …', 'enregistrement…', 'salvando…', 'salvataggio…'],
     ['synced', 'sincronizado', 'synchron', 'synchronisé', 'sincronizado', 'sincronizzato'],
     ['sync error — retries with your next save', 'error de sincronización: se reintenta en tu próximo guardado', 'Sync-Fehler – neuer Versuch beim nächsten Speichern', 'erreur de synchronisation — nouvel essai à la prochaine sauvegarde', 'erro de sincronização — tenta de novo no próximo save', 'errore di sincronizzazione — nuovo tentativo al prossimo salvataggio'],
@@ -135,26 +134,17 @@
 
     // ---- settings
     ['Audio', 'Audio', 'Audio', 'Audio', 'Áudio', 'Audio'],
-    ['Music', 'Música', 'Musik', 'Musique', 'Música', 'Musica'],
-    ['Effects', 'Efectos', 'Effekte', 'Effets', 'Efeitos', 'Effetti'],
-    ['Ambience', 'Ambiente', 'Atmosphäre', 'Ambiance', 'Ambiente', 'Ambiente'],
-    ['Voice cues', 'Avisos de voz', 'Sprachhinweise', 'Signaux vocaux', 'Avisos de voz', 'Segnali vocali'],
-    ['Mute all audio', 'Silenciar todo el audio', 'Alles stummschalten', 'Couper tout le son', 'Silenciar todo o áudio', 'Silenzia tutto l’audio'],
     ['Captions for meaningful audio', 'Subtítulos para el audio importante', 'Untertitel für wichtige Klänge', 'Sous-titres des sons importants', 'Legendas para áudio importante', 'Sottotitoli per l’audio importante'],
     ['Display', 'Pantalla', 'Anzeige', 'Affichage', 'Tela', 'Schermo'],
     ['Visual theme', 'Tema visual', 'Farbthema', 'Thème visuel', 'Tema visual', 'Tema visivo'],
-    ['Reduced motion (no camera swoops, shake, or heavy particles)', 'Movimiento reducido (sin barridos de cámara, sacudidas ni partículas intensas)', 'Weniger Bewegung (keine Kameraschwenks, kein Wackeln, keine starken Partikel)', 'Animations réduites (pas de mouvements de caméra, de secousses ni de particules lourdes)', 'Movimento reduzido (sem varreduras de câmera, tremores ou partículas pesadas)', 'Movimento ridotto (niente panoramiche, scosse o particelle intense)'],
-    ['High contrast', 'Alto contraste', 'Hoher Kontrast', 'Contraste élevé', 'Alto contraste', 'Alto contrasto'],
     ['Accessibility', 'Accesibilidad', 'Barrierefreiheit', 'Accessibilité', 'Acessibilidade', 'Accessibilità'],
     ['Color-vision palette', 'Paleta para daltonismo', 'Farbsehen-Palette', 'Palette daltonisme', 'Paleta para daltonismo', 'Tavolozza per daltonismo'],
     ['Default', 'Predeterminada', 'Standard', 'Par défaut', 'Padrão', 'Predefinita'],
     ['Deuteranopia-safe', 'Apta para deuteranopía', 'Für Deuteranopie', 'Adaptée deutéranopie', 'Para deuteranopia', 'Per deuteranopia'],
     ['Protanopia-safe', 'Apta para protanopía', 'Für Protanopie', 'Adaptée protanopie', 'Para protanopia', 'Per protanopia'],
     ['Tritanopia-safe', 'Apta para tritanopía', 'Für Tritanopie', 'Adaptée tritanopie', 'Para tritanopia', 'Per tritanopia'],
-    ['Larger text', 'Texto más grande', 'Größerer Text', 'Texte agrandi', 'Texto maior', 'Testo più grande'],
     ['Left-handed controls', 'Controles para zurdos', 'Linkshänder-Steuerung', 'Commandes pour gauchers', 'Controles para canhotos', 'Comandi per mancini'],
     ['Haptics (vibration)', 'Vibración', 'Haptik (Vibration)', 'Retour haptique (vibration)', 'Vibração', 'Vibrazione'],
-    ['Hold to confirm destructive actions', 'Mantener para confirmar acciones destructivas', 'Halten, um riskante Aktionen zu bestätigen', 'Maintenir pour confirmer les actions destructrices', 'Segurar para confirmar ações destrutivas', 'Tieni premuto per confermare le azioni distruttive'],
     ['Learning', 'Aprendizaje', 'Lernen', 'Apprentissage', 'Aprendizado', 'Apprendimento'],
     ['Tutorial progress: complete.', 'Progreso del tutorial: completo.', 'Tutorial-Fortschritt: abgeschlossen.', 'Progression du tutoriel : terminée.', 'Progresso do tutorial: concluído.', 'Avanzamento del tutorial: completato.'],
     ['Tutorial progress: not finished.', 'Progreso del tutorial: sin terminar.', 'Tutorial-Fortschritt: nicht abgeschlossen.', 'Progression du tutoriel : non terminée.', 'Progresso do tutorial: não concluído.', 'Avanzamento del tutorial: non completato.'],
@@ -195,7 +185,6 @@
     ['Tap to select, tap again (or Fire) to commit. Drag the table to shift the camera.', 'Toca para seleccionar y vuelve a tocar (o Disparar) para confirmar. Arrastra la mesa para mover la cámara.', 'Tippen zum Auswählen, erneut tippen (oder Feuer) zum Ausführen. Zieh den Tisch, um die Kamera zu verschieben.', 'Touchez pour sélectionner, touchez à nouveau (ou Tirer) pour valider. Faites glisser la table pour déplacer la caméra.', 'Toque para selecionar e toque de novo (ou Disparar) para confirmar. Arraste a mesa para mover a câmera.', 'Tocca per selezionare, tocca di nuovo (o Fuoco) per confermare. Trascina il tavolo per spostare la visuale.'],
 
     // ---- match HUD
-    ['Match', 'Partida', 'Match', 'Partie', 'Partida', 'Partita'],
     ['Pause', 'Pausa', 'Pause', 'Pause', 'Pausar', 'Pausa'],
     ['Deploy your fleet', 'Despliega tu flota', 'Stell deine Flotte auf', 'Déployez votre flotte', 'Posicione sua frota', 'Schiera la flotta'],
     ['Placement', 'Despliegue', 'Aufstellung', 'Déploiement', 'Posicionamento', 'Schieramento'],
@@ -320,9 +309,31 @@
     ['Gamepad connected — stick aims, A confirms, B cancels.', 'Mando conectado: la palanca apunta, A confirma, B cancela.', 'Gamepad verbunden – Stick zielt, A bestätigt, B bricht ab.', 'Manette connectée — le stick vise, A valide, B annule.', 'Controle conectado — o analógico mira, A confirma, B cancela.', 'Gamepad collegato: la levetta mira, A conferma, B annulla.'],
     ['Match restored from the last safe snapshot.', 'Partida restaurada desde la última instantánea segura.', 'Match aus dem letzten sicheren Stand wiederhergestellt.', 'Partie restaurée depuis le dernier instantané sûr.', 'Partida restaurada a partir do último instantâneo seguro.', 'Partita ripristinata dall’ultima istantanea sicura.'],
 
-    // ---- WebGL fallback (main.js)
-    ['This device or browser does not support WebGL, which the holographic chart table requires.', 'Este dispositivo o navegador no admite WebGL, que la mesa de cartas holográfica necesita.', 'Dieses Gerät oder dieser Browser unterstützt kein WebGL, das der holografische Kartentisch braucht.', 'Cet appareil ou ce navigateur ne prend pas en charge WebGL, nécessaire à la table à cartes holographique.', 'Este dispositivo ou navegador não suporta WebGL, necessário para a mesa de cartas holográfica.', 'Questo dispositivo o browser non supporta WebGL, necessario al tavolo da carteggio olografico.'],
-    ['Your profile and any saved progress on this device are preserved. Try a current version of Firefox, Chrome, Edge or Safari with hardware acceleration enabled.', 'Tu perfil y el progreso guardado en este dispositivo se conservan. Prueba una versión actual de Firefox, Chrome, Edge o Safari con la aceleración por hardware activada.', 'Dein Profil und gespeicherter Fortschritt auf diesem Gerät bleiben erhalten. Versuch eine aktuelle Version von Firefox, Chrome, Edge oder Safari mit aktivierter Hardwarebeschleunigung.', 'Votre profil et la progression enregistrée sur cet appareil sont conservés. Essayez une version récente de Firefox, Chrome, Edge ou Safari avec l’accélération matérielle activée.', 'Seu perfil e o progresso salvo neste dispositivo são preservados. Tente uma versão atual do Firefox, Chrome, Edge ou Safari com aceleração de hardware ativada.', 'Il tuo profilo e i progressi salvati su questo dispositivo sono conservati. Prova una versione recente di Firefox, Chrome, Edge o Safari con l’accelerazione hardware attiva.']
+    // ---- engine client (StarHermit runtime Options, audio captions)
+    ['StarHermit Options', 'Opciones de StarHermit', 'StarHermit-Optionen', 'Options StarHermit', 'Opções do StarHermit', 'Opzioni StarHermit'],
+    ['Sound volumes, graphics quality, frame rate, controls, language, text size, high contrast and reduced motion are in the StarHermit Options (F1).', 'El volumen del sonido, la calidad gráfica, la tasa de fotogramas, los controles, el idioma, el tamaño del texto, el alto contraste y el movimiento reducido están en las Opciones de StarHermit (F1).', 'Lautstärke, Grafikqualität, Bildrate, Steuerung, Sprache, Textgröße, hoher Kontrast und reduzierte Bewegung findest du in den StarHermit-Optionen (F1).', 'Les volumes sonores, la qualité graphique, la fréquence d’images, les commandes, la langue, la taille du texte, le contraste élevé et les animations réduites se trouvent dans les options StarHermit (F1).', 'Volume do som, qualidade gráfica, taxa de quadros, controles, idioma, tamanho do texto, alto contraste e movimento reduzido ficam nas Opções do StarHermit (F1).', 'Volumi audio, qualità grafica, frequenza dei fotogrammi, comandi, lingua, dimensione del testo, contrasto elevato e movimento ridotto sono nelle Opzioni StarHermit (F1).'],
+    ['[ui press]', '[pulsación]', '[Tastendruck]', '[appui]', '[toque]', '[pressione]'],
+    ['[ui back]', '[atrás]', '[zurück]', '[retour]', '[voltar]', '[indietro]'],
+    ['[invalid action]', '[acción no válida]', '[ungültige Aktion]', '[action invalide]', '[ação inválida]', '[azione non valida]'],
+    ['[ship placed]', '[buque colocado]', '[Schiff platziert]', '[navire placé]', '[navio posicionado]', '[nave piazzata]'],
+    ['[rotate]', '[girar]', '[drehen]', '[rotation]', '[girar]', '[ruota]'],
+    ['[shot fired]', '[disparo]', '[Schuss abgefeuert]', '[tir lancé]', '[disparo]', '[colpo sparato]'],
+    ['[splash — miss]', '[chapoteo: agua]', '[Platschen – Fehlschuss]', '[éclaboussure — manqué]', '[respingo — erro]', '[spruzzo: mancato]'],
+    ['[impact — hit]', '[impacto: tocado]', '[Einschlag – Treffer]', '[impact — touché]', '[impacto — acerto]', '[impatto: colpito]'],
+    ['[ship sunk]', '[buque hundido]', '[Schiff versenkt]', '[navire coulé]', '[navio afundado]', '[nave affondata]'],
+    ['[mine detonated]', '[mina detonada]', '[Mine detoniert]', '[mine explosée]', '[mina detonada]', '[mina esplosa]'],
+    ['[your turn]', '[tu turno]', '[du bist dran]', '[à vous]', '[sua vez]', '[tocca a te]'],
+    ['[countdown]', '[cuenta regresiva]', '[Countdown]', '[compte à rebours]', '[contagem regressiva]', '[conto alla rovescia]'],
+    ['[victory fanfare]', '[fanfarria de victoria]', '[Siegesfanfare]', '[fanfare de victoire]', '[fanfarra de vitória]', '[fanfara di vittoria]'],
+    ['[defeat]', '[derrota]', '[Niederlage]', '[défaite]', '[derrota]', '[sconfitta]'],
+    ['[lesson complete]', '[lección completada]', '[Lektion abgeschlossen]', '[leçon terminée]', '[lição concluída]', '[lezione completata]'],
+    ['[achievement unlocked]', '[logro desbloqueado]', '[Erfolg freigeschaltet]', '[succès débloqué]', '[conquista desbloqueada]', '[obiettivo sbloccato]'],
+    ['[battle stations]', '[zafarrancho de combate]', '[Gefechtsstationen]', '[aux postes de combat]', '[postos de combate]', '[ai posti di combattimento]'],
+    ['[target selected]', '[objetivo seleccionado]', '[Ziel gewählt]', '[cible sélectionnée]', '[alvo selecionado]', '[bersaglio selezionato]'],
+    ['[sonar hint]', '[pista del sonar]', '[Sonar-Hinweis]', '[indice sonar]', '[dica do sonar]', '[suggerimento sonar]'],
+    ['[fleet destroyed]', '[flota destruida]', '[Flotte zerstört]', '[flotte détruite]', '[frota destruída]', '[flotta distrutta]'],
+    ['[pass the chart]', '[pasa la carta]', '[Karte weitergeben]', '[passez la carte]', '[passe a carta]', '[passa la carta]'],
+    ['[sea ambience]', '[ambiente marino]', '[Meeresatmosphäre]', '[ambiance marine]', '[ambiente marinho]', '[ambiente marino]'],
   ];
 
   var FULL = ['es-419', 'de-DE', 'fr-FR', 'pt-BR', 'it-IT'];
@@ -345,4 +356,4 @@
     var t = S[l] = S[l] || {};
     ROWS.forEach(function (r) { t[r[0]] = r[i + 1]; });
   });
-})(typeof self !== 'undefined' ? self : this);
+})(typeof globalThis !== 'undefined' ? globalThis : this);

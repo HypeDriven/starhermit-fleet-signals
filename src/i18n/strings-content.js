@@ -161,4 +161,4 @@
     var t = S[l] = S[l] || {};
     ROWS.forEach(function (r) { t[r[0]] = r[i + 1]; });
   });
-})(typeof self !== 'undefined' ? self : this);
+})(typeof globalThis !== 'undefined' ? globalThis : this);

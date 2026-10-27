@@ -7,6 +7,12 @@ import * as E from '../rules/engine.js';
 import { chooseCommand, suggestTarget } from '../rules/ai.js';
 import { makeRng } from '../rules/rng.js';
 
+// The clock elapsed time is measured on (Date.now by default; the engine
+// client runs it on the game clock, which pauses while suspended and is
+// deterministic in checks).
+let clock = () => Date.now();
+export function setSessionClock(fn) { clock = typeof fn === 'function' ? fn : () => Date.now(); }
+
 export class GameSession {
   /**
    * @param {object} opts
@@ -42,10 +48,10 @@ export class GameSession {
     const { events, duplicate } = E.applyCommand(this.state, cmd);
     if (!duplicate) E.recordReplayStep(this.replay, cmd, this.state);
     if (!wasBattle && this.state.phase === 'battle' && this.startedAt === null) {
-      this.startedAt = Date.now();
+      this.startedAt = clock();
     }
     if (this.state.phase === 'finished' && this.finishedAt === null) {
-      this.finishedAt = Date.now();
+      this.finishedAt = clock();
     }
     this.lastEvents = events;
     return { events, duplicate: !!duplicate };
@@ -103,7 +109,7 @@ export class GameSession {
 
   elapsedMs() {
     if (this.startedAt === null) return 0;
-    const end = this.finishedAt !== null ? this.finishedAt : Date.now();
+    const end = this.finishedAt !== null ? this.finishedAt : clock();
     return this.elapsedCarry + (end - this.startedAt);
   }
 
@@ -144,8 +150,8 @@ export class GameSession {
     session.undoStack = data.undoStack || [];
     session.replay = data.replay;
     session.elapsedCarry = data.elapsedCarry || 0;
-    if (session.state.phase === 'battle') session.startedAt = Date.now();
-    if (session.state.phase === 'finished') session.finishedAt = Date.now();
+    if (session.state.phase === 'battle') session.startedAt = clock();
+    if (session.state.phase === 'finished') session.finishedAt = clock();
     return session;
   }
 }

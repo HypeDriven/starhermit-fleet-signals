@@ -1,0 +1,166 @@
+/* Fleet Signals — the browser build's src/ui/styles.css rewritten
+   class-based for the engine's UI (`npm run css` converts it into
+   assets/ui-style.json). Element selectors, ids, attribute selectors and
+   @media do not convert: every widget names its classes and the old
+   breakpoints are layouts picked in native/screens.ts. The theme's colours
+   (--accent, --bg, --panel, --text) are tokens native/style.ts sets per
+   visual theme, as App.applySettings set the CSS variables; the high
+   contrast, larger text and reduced motion modes are the runtime's options.
+   The chart's coordinate labels, the ship pips and the ready dots are drawn
+   by hand (native/screens.ts). */
+
+:root {
+  --accent: #59e6ff;
+  --bg: #0a1626;
+  --panel: #0a1828e0;
+  --panel-solid: #0d1c30;
+  --text: #e8f2fa;
+  --text-dim: #9db4c6;
+  --danger: #ff5468;
+  --ok: #6ff2c8;
+  --warn: #ffc857;
+  --hit: #ff7a3c;
+  --miss: #cfe8ff;
+  --on-accent: #04222e;
+  --line: #59e6ff40;
+  --line-soft: #59e6ff2e;
+  --rule: #ffffff17;
+  --btn: #59e6ff1f;
+  --btn-hover: #59e6ff3d;
+  --btn-line: #59e6ff73;
+  --veil: #040a12d6;
+}
+
+* { box-sizing: border-box; }
+
+/* ------------------------------------------------------------- text */
+.text { color: var(--text); font-size: 16px; }
+.dim { color: var(--text-dim); font-size: 16px; }
+.small { color: var(--text-dim); font-size: 13.6px; }
+.strong { color: var(--text); font-size: 16px; font-weight: 700; }
+.game-title { color: var(--text); font-size: 41.6px; font-weight: 700; letter-spacing: 3.3px; text-shadow: 0 0 24px var(--accent); }
+.game-subtitle { color: var(--text-dim); font-size: 16px; }
+.h2 { color: var(--text); font-size: 24px; font-weight: 700; }
+.h3 { color: var(--accent); font-size: 17px; font-weight: 700; }
+.legend { color: var(--accent); font-size: 16px; font-weight: 600; }
+.field-label { color: var(--text-dim); font-size: 16px; }
+.result-win { color: var(--ok); font-size: 32px; font-weight: 700; }
+.result-loss { color: var(--danger); font-size: 32px; font-weight: 700; }
+.result-draw { color: var(--text); font-size: 32px; font-weight: 700; }
+.countdown { color: var(--accent); font-size: 96px; font-weight: 800; text-shadow: 0 0 32px var(--accent); }
+.stars { color: var(--warn); font-size: 25.6px; letter-spacing: 3.8px; }
+.cell-label { color: var(--text-dim); font-size: 11px; }
+.stat-num { color: var(--accent); font-size: 22.4px; font-weight: 800; }
+.stat-label { color: var(--text-dim); font-size: 12.8px; }
+.ok-text { color: var(--ok); font-size: 16px; }
+.warn-text { color: var(--warn); font-size: 16px; }
+
+/* ------------------------------------------------------------- buttons */
+.btn {
+  font-size: 16px; color: var(--text); background: var(--btn);
+  border: 1px solid var(--btn-line); border-radius: 10px;
+  min-height: 44px; min-width: 44px; padding: 10px 18px; text-align: center;
+  transition: transform .1s ease;
+}
+.btn:hover { background: var(--btn-hover); }
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .45; }
+.btn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.btn-primary {
+  font-size: 16px; color: var(--on-accent); background: var(--accent); font-weight: 700;
+  border: 1px solid var(--accent); border-radius: 10px;
+  min-height: 44px; min-width: 44px; padding: 10px 18px; text-align: center;
+  transition: transform .1s ease;
+}
+.btn-primary:hover { background: var(--accent); }
+.btn-primary:active { transform: scale(.97); }
+.btn-primary:disabled { opacity: .45; }
+.btn-danger {
+  font-size: 16px; color: var(--text); background: #ff546826;
+  border: 1px solid var(--danger); border-radius: 10px;
+  min-height: 44px; min-width: 44px; padding: 10px 18px; text-align: center;
+  transition: transform .1s ease;
+}
+.btn-danger:hover { background: #ff546840; }
+.btn-danger:active { transform: scale(.97); }
+.btn-ghost {
+  font-size: 16px; color: var(--text); background: #00000000;
+  border: 1px solid #00000000; border-radius: 10px;
+  min-height: 44px; min-width: 44px; padding: 10px 18px; text-align: center;
+  transition: transform .1s ease;
+}
+.btn-ghost:hover { background: var(--btn); }
+.btn-ghost:active { transform: scale(.97); }
+.btn-play { font-size: 20px; padding: 16px 24px; }
+.btn-tight { padding: 6px 10px; }
+.ship-chip {
+  font-size: 16px; color: var(--text); background: #59e6ff14;
+  border: 1px solid var(--accent); border-radius: 8px;
+  min-height: 44px; padding: 6px 10px; text-align: center;
+}
+.ship-chip:hover { background: var(--btn-hover); }
+.ship-chip.active { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+.ship-chip-placed { opacity: .4; }
+.stage-cell {
+  font-size: 13.6px; color: var(--text); background: var(--btn);
+  border: 1px solid var(--btn-line); border-radius: 10px;
+  min-height: 64px; min-width: 56px; padding: 4px; text-align: center;
+}
+.stage-cell:hover { background: var(--btn-hover); }
+.stage-cell:disabled { opacity: .35; }
+.stage-mastery { border: 1px solid var(--hit); }
+
+/* ------------------------------------------------------------- panels */
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 24px; box-shadow: 0 18px 60px #00000080;
+}
+.panel-blur {
+  background: #0a1828b8; border: 1px solid var(--line); border-radius: 14px;
+  padding: 24px; box-shadow: 0 18px 60px #00000080; backdrop-filter: blur(6px);
+}
+.screen-dim { background: var(--veil); }
+.title-art { border: 1px solid #59e6ff59; border-radius: 10px; }
+.results-art { border: 1px solid #59e6ff4d; border-radius: 10px; }
+.badge { border: 1px solid var(--accent); border-radius: 999px; padding: 2px 10px; }
+.badge-text { color: var(--accent); font-size: 12.8px; }
+.badge-ranked { border: 1px solid var(--warn); border-radius: 999px; padding: 2px 10px; }
+.badge-ranked-text { color: var(--warn); font-size: 12.8px; }
+.fieldset { border: 1px solid #59e6ff33; border-radius: 10px; padding: 12px; }
+.score-row { border-bottom: 1px dashed #ffffff1a; padding: 6px 8px; }
+.score-total { border-top: 2px solid var(--accent); padding: 6px 8px; }
+.score-total-text { color: var(--accent); font-size: 16px; font-weight: 800; }
+.stat-box { background: #ffffff0d; border-radius: 8px; padding: 10px; }
+.list-row { border-bottom: 1px dashed #ffffff14; padding: 8px 0; }
+.list-row-locked { border-bottom: 1px dashed #ffffff14; padding: 8px 0; opacity: .45; }
+
+/* ------------------------------------------------------------- HUD */
+.hud-objective { background: var(--panel); border: 1px solid #59e6ff33; border-radius: 10px; padding: 8px 14px; }
+.obj-title { color: var(--text); font-size: 16px; font-weight: 700; }
+.obj-sub { color: var(--text-dim); font-size: 13.6px; }
+.hud-turn { background: var(--panel); border: 1px solid #59e6ff33; border-radius: 10px; padding: 8px 14px; }
+.hud-turn-yours { background: var(--panel); border: 1px solid var(--ok); border-radius: 10px; padding: 8px 14px; }
+.hud-turn-theirs { background: var(--panel); border: 1px solid var(--warn); border-radius: 10px; padding: 8px 14px; }
+.turn-text { color: var(--text); font-size: 16px; }
+.turn-yours-text { color: var(--ok); font-size: 16px; }
+.turn-theirs-text { color: var(--warn); font-size: 16px; }
+.rail { background: var(--panel); border: 1px solid var(--line-soft); border-radius: 10px; padding: 12px; }
+.rail-drawer { background: var(--panel-solid); border: 1px solid var(--line-soft); border-radius: 10px; padding: 12px; box-shadow: 0 12px 40px #00000080; }
+.rail-h { color: var(--accent); font-size: 15.2px; font-weight: 700; }
+.fleet-row { border-bottom: 1px dashed #ffffff14; padding: 4px 0; }
+.fleet-text { color: var(--text); font-size: 14.4px; }
+.fleet-sunk { color: var(--text); font-size: 14.4px; opacity: .45; }
+.log-line { color: var(--text-dim); font-size: 13.6px; }
+.log-latest { color: var(--text); font-size: 13.6px; }
+.log-row { border-bottom: 1px dashed #ffffff0f; padding: 3px 0; }
+.tray { background: var(--panel); border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px; }
+.resolving { color: var(--text-dim); font-size: 16px; padding: 8px; }
+
+/* ------------------------------------------------------------- toasts / captions */
+.toast { background: var(--panel-solid); border: 1px solid var(--accent); border-radius: 8px; padding: 8px 16px; animation: toast-in .2s ease; }
+.toast-error { background: var(--panel-solid); border: 1px solid var(--danger); border-radius: 8px; padding: 8px 16px; animation: toast-in .2s ease; }
+.toast-text { color: var(--text); font-size: 16px; }
+.toast-error-text { color: var(--danger); font-size: 16px; }
+.caption { background: #000000bf; border-radius: 6px; padding: 4px 12px; }
+.caption-text { color: #ffffff; font-size: 14px; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; } }
