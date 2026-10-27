@@ -3,25 +3,20 @@
  * Covers: legal actions, invalid-action reasons, scoring components,
  * terminal states, serialization migration, replay determinism
  * (property), fuzzed malformed commands, content validators, AI
- * termination, session undo/restore, and the authoritative server script.
+ * termination, session undo/restore, the session clock hook, and the
+ * authoritative server script.
  */
 import * as E from '../src/rules/engine.js';
 import { makeRng, hashString } from '../src/rules/rng.js';
 import { chooseCommand } from '../src/rules/ai.js';
-import { GameSession } from '../src/session/session.js';
+import { GameSession, setSessionClock } from '../src/session/session.js';
 import {
   STAGES, CHALLENGES, THEMES, dailyStage, validateStage, stageById, challengeById,
 } from '../src/content/stages.js';
 import {
   createSession, handleMessage, getSnapshot, checkDeadline, sessionSummary,
 } from '../server.js';
-import {
-  PRESETS, CATEGORIES, detectPreset, resolve, presetTier, choosePreset, describe, fromLegacyTier,
-  LEVELS, BUDGETS, budget, detectLevel, presetForLevel, particleCap,
-} from '../src/render/gfx.js';
-// src/render/gpu-level.js is a classic script in the page; imported here it sets globalThis.StarHermitGpu.
-await import('../src/render/gpu-level.js');
-import { GFX_LOCALES, gfxStrings, pickGfxLocale } from '../src/ui/gfx-i18n.js';
+import { matchLocale } from '../src/i18n/core.js';
 
 let passed = 0;
 let failed = 0;
@@ -668,83 +663,32 @@ test('golden: scripted easy/medium/hard sessions match pinned hashes', () => {
   }
 });
 
-/* platform adapter tests live in tests/platform.test.mjs (node --test) */
+/* save, options and foreign-save tests live in tests/save.test.mjs (node --test) */
 
-/* ==================== graphics quality model ==================== */
+/* ==================== locales ==================== */
 
-test('gfx: hardware level picks the Auto preset (StarHermit gpu-level.js)', () => {
-  eq(detectPreset('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)'), 'low');
-  eq(detectPreset('llvmpipe (LLVM 15.0.7, 256 bits)'), 'low');
-  eq(detectPreset('ANGLE (AMD, AMD Radeon(TM) Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)'), 'low');
-  eq(detectPreset('ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11)'), 'low');
-  eq(detectPreset('ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11)'), 'balanced');
-  eq(detectPreset('ANGLE (NVIDIA, NVIDIA GeForce GTX 1070 Direct3D11 vs_5_0 ps_5_0)'), 'high');
-  eq(detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 Direct3D11 vs_5_0 ps_5_0)'), 'ultra');
-  eq(detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 5090 Direct3D11 vs_5_0 ps_5_0)'), 'ultra');
-  eq(detectLevel('NVIDIA GeForce RTX 5090'), 20);
-  eq(detectLevel('SwiftShader'), 0);
-  for (const [p, lv] of Object.entries(LEVELS)) eq(presetForLevel(lv), p);
-  eq(presetForLevel(9), 'balanced');
-  eq(presetForLevel(16), 'high');
-  assert(['low', 'balanced'].includes(detectPreset('Adreno (TM) 740', { mobile: true })), 'mobile Adreno 740 is Balanced at most');
-  eq(detectPreset('NVIDIA GeForce RTX 5090', { mobile: true }), 'balanced', 'phones/tablets cap at Balanced');
-  eq(detectPreset('SwiftShader', { mobile: true }), 'low');
+test('locale: BCP 47 tags map to the nearest shipped locale', () => {
+  eq(matchLocale('es-MX'), 'es-419'); eq(matchLocale('es-ES'), 'es-ES'); eq(matchLocale('fr-CA'), 'fr-CA');
+  eq(matchLocale('fr'), 'fr-FR'); eq(matchLocale('en-AU'), 'en-GB'); eq(matchLocale('en'), 'en-US');
+  eq(matchLocale('pt-PT'), 'pt-BR'); eq(matchLocale('de-AT'), 'de-DE'); eq(matchLocale('it'), 'it-IT'); eq(matchLocale('ja-JP'), 'en-US');
 });
 
-test('gfx: per-preset budgets are explicit, grow from Low to Ultra and scale with the level', () => {
-  const keys = ['material', 'chart', 'brushed', 'sea', 'segments', 'stars', 'sparks', 'hudBlur', 'bloomRes', 'aoRes'];
-  for (const p of PRESETS) for (const k of keys) assert(k in BUDGETS[p], `${p}.${k}`);
-  for (let i = 1; i < PRESETS.length; i++) {
-    const a = BUDGETS[PRESETS[i - 1]], b = BUDGETS[PRESETS[i]];
-    for (const k of ['chart', 'brushed', 'sea', 'segments', 'stars', 'sparks', 'bloomRes', 'aoRes']) assert(b[k] >= a[k], `${PRESETS[i]}.${k}`);
-  }
-  eq(BUDGETS.low.material, 'lambert');
-  eq(BUDGETS.balanced.hudBlur, false);
-  eq(BUDGETS.high.hudBlur, true);
-  eq(JSON.stringify(budget('high', 10)), JSON.stringify(BUDGETS.high), 'floor level = table');
-  assert(budget('high', 14).sparks > BUDGETS.high.sparks, 'sparks grow above the floor');
-  assert(budget('ultra', 20).sparks <= BUDGETS.ultra.sparks * 2, 'at most 2x');
-  assert(budget('ultra', 2).sparks < BUDGETS.ultra.sparks, 'fewer below the floor');
-  eq(particleCap('high', BUDGETS.low), 1600);
-  eq(JSON.stringify(resolve({ preset: 'low' }, 'low', 0).budget), JSON.stringify(BUDGETS.low));
-  eq(resolve({}, 'ultra', 20).level, 20);
-});
-
-test('gfx: resolve applies preset, overrides and clamps render scale', () => {
-  const auto = resolve({}, 'low');
-  eq(auto.preset, 'low'); eq(auto.auto, true); eq(auto.post, false, 'Low renders without a composer');
-  eq(auto.shadows, 'off'); eq(auto.adaptive, true); eq(auto.showFps, false);
-  const hi = resolve({ preset: 'high', shadows: 'off', bloom: 'bogus' }, 'low');
-  eq(hi.preset, 'high'); eq(hi.auto, false);
-  eq(hi.shadows, 'off', 'override wins'); eq(hi.bloom, 'on', 'invalid override falls back to the preset');
-  eq(hi.ao, presetTier('high', 'ao'));
-  eq(resolve({ preset: 'balanced', render_scale: 9 }).renderScale, 2);
-  eq(resolve({ preset: 'balanced', render_scale: 0.1 }).renderScale, 0.5);
-  eq(resolve({ preset: 'ultra', render_scale: 1 }).scale, 1.25);
-  eq(resolve({ preset: 'nope' }, undefined).preset, 'balanced');
-  for (const p of PRESETS) for (const [cat, tiers] of Object.entries(CATEGORIES)) {
-    assert(tiers.includes(presetTier(p, cat)), `${p}.${cat} is a valid tier`);
-  }
-  assert(/no shadows/.test(describe(auto, [800, 600])) && /800×600 px/.test(describe(auto, [800, 600])));
-});
-
-test('gfx: choosing a preset clears overrides but keeps scale and toggles', () => {
-  const next = choosePreset({ preset: 'high', shadows: 'off', bloom: 'off', render_scale: 1.5, show_fps: true }, 'low');
-  eq(JSON.stringify(next), JSON.stringify({ preset: 'low', render_scale: 1.5, show_fps: true }));
-  eq(choosePreset({}, 'auto').preset, 'auto');
-  eq(fromLegacyTier('medium'), 'balanced'); eq(fromLegacyTier('auto'), 'auto');
-});
-
-test('gfx: Graphics panel strings exist in every locale', () => {
-  const ref = gfxStrings('en-US');
-  for (const loc of GFX_LOCALES) {
-    const t = gfxStrings(loc);
-    for (const k of Object.keys(ref)) assert(t[k], `${loc}.${k}`);
-    for (const k of Object.keys(CATEGORIES)) assert(t.cat[k], `${loc}.cat.${k}`);
-    for (const tiers of Object.values(CATEGORIES)) for (const k of tiers) assert(t.tier[k], `${loc}.tier.${k}`);
-    for (const k of PRESETS) assert(t.tier[k], `${loc}.tier.${k}`);
-  }
-  eq(pickGfxLocale('es-MX'), 'es-419'); eq(pickGfxLocale('fr-CA'), 'fr-CA'); eq(pickGfxLocale('ja-JP'), 'en-US');
+test('session: elapsed time runs on the injected clock (the engine game clock)', () => {
+  let now = 5000;
+  setSessionClock(() => now);
+  try {
+    const stage = STAGES[0];
+    const s = new GameSession({ config: { seed: stage.seed, gridSize: stage.gridSize, fleetId: stage.fleetId, mechanics: stage.mechanics,
+      players: [{ id: 'you', name: 'You' }, { id: 'ai', name: 'AI', isAI: true, difficulty: 'easy' }] }, mode: 'journey' });
+    s.command({ type: 'auto-place', playerId: 'you' });
+    while (s.state.phase === 'placement') s.stepAI();
+    eq(s.elapsedMs(), 0);
+    now += 2500;
+    eq(s.elapsedMs(), 2500);
+    const r = GameSession.restore(s.serialize());
+    now += 1000;
+    eq(r.elapsedMs(), 3500, 'a restored match carries its time and keeps counting');
+  } finally { setSessionClock(null); }
 });
 
 /* ==================== summary ==================== */

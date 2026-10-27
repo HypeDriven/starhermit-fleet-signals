@@ -1,31 +1,29 @@
-// Localization coverage: every English key the UI shows — static text and
-// labels inside the HTML templates (translated by the DOM observer in
-// src/i18n/i18n.js), T('…') / N('…') keys in code, the engine's log and score
-// patterns, and the content names (stages, briefings, challenges, themes,
+// Localization coverage: every English key the engine client shows — T('…') /
+// N('…') keys in native/*.ts, the engine's log and score patterns, the audio
+// captions and the content names (stages, briefings, challenges, themes,
 // lessons, achievements, ships, captains) — is translated in every locale
 // (en-GB → en-US, es-ES → es-419, fr-CA → fr-FR inherit) with intact
-// placeholders, and the language follows sh-language.js and switches live.
+// placeholders; no table row goes unused; the lookup switches locales.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { loadTables, codeKeys, literals, htmlKeys, mixedSegments, audit, bootI18n } from './i18n-common.mjs';
+import { loadTables, codeKeys, audit } from './i18n-common.mjs';
 import { STAGES, CHALLENGES, THEMES } from '../src/content/stages.js';
 import { LESSONS } from '../src/content/tutorial.js';
 import { FLEETS } from '../src/rules/engine.js';
+import { createI18n } from '../src/i18n/core.js';
 
 const ROOT = new URL('../', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 const FILES = ['src/i18n/strings.js', 'src/i18n/strings-content.js'];
-const jsFiles = (dir) => readdirSync(new URL(dir, ROOT), { recursive: true }).filter((f) => f.endsWith('.js') && !f.startsWith('i18n')).map((f) => dir + f);
-const UI_FILES = [...jsFiles('src/ui/'), 'src/main.js'];
+const NATIVE = readdirSync(new URL('native/', ROOT)).filter((f) => f.endsWith('.ts')).map((f) => 'native/' + f);
 
 export function usedKeys() {
   const keys = new Set();
-  for (const f of [...jsFiles('src/'), 'src/main.js']) {
-    const src = read(f);
-    codeKeys(src).forEach((k) => keys.add(k));
-    if (UI_FILES.includes(f)) for (const lit of literals(src)) htmlKeys(lit).forEach((k) => keys.add(k));
-  }
+  for (const f of NATIVE) codeKeys(read(f)).forEach((k) => keys.add(k));
+  // The audio captions (native/audio.ts CAPTIONS, translated where they are drawn).
+  const audio = read('native/audio.ts');
+  for (const m of audio.matchAll(/"(\[[^"\]]+\])"/g)) keys.add(m[1]);
   for (const s of STAGES) { keys.add(s.name); keys.add(s.briefing); }
   for (const c of CHALLENGES) { keys.add(c.name); keys.add(c.description); keys.add(c.goalText); }
   for (const t of THEMES) keys.add(t.name);
@@ -41,37 +39,28 @@ export function usedKeys() {
   return [...keys].filter((k) => /[A-Za-z]/.test(k)).sort();
 }
 
-test('every used key is translated in every locale; placeholders intact', () => {
+test('every used key is translated in every locale; placeholders intact; no unused rows', () => {
   assert.deepEqual(audit(loadTables(ROOT, FILES, 'FS_STRINGS'), usedKeys()), []);
 });
 
-test('template text never mixes words with an interpolation in one text node', () => {
-  const bad = [];
-  for (const f of UI_FILES) for (const lit of literals(read(f))) bad.push(...mixedSegments(lit));
-  // "Learn" / "Profile" are followed by a badge element, so they stay separate text nodes.
-  assert.deepEqual(bad.filter((s) => !/^(Learn|Profile) …$/.test(s)), []);
+test('the lookup follows the interface language and switches live', () => {
+  const I = createI18n(loadTables(ROOT, FILES, 'FS_STRINGS'));
+  assert.equal(I.T('Confirm deployment'), 'Confirm deployment');
+  I.setLocale('de-DE');
+  assert.equal(I.T('Confirm deployment'), 'Aufstellung bestätigen');
+  I.setLocale('fr-CA');
+  assert.equal(I.lang, 'fr-CA');
+  assert.equal(I.T('Admiral Cipher'), 'Amiral Chiffre');
+  I.setLocale('es-ES');
+  assert.equal(I.T('Deploy all {n} ships first.', { n: 5 }), 'Despliega primero los 5 buques.');
+  I.setLocale('en-GB');
+  assert.equal(I.T('Color-vision palette'), 'Colour-vision palette');
+  assert.ok(I.has('Sentinel Carrier') && !I.has('Salty Admiral'));
 });
 
-test('the locale follows sh-language and switches live', () => {
-  const { I18N, events, doc } = bootI18n(ROOT, { files: ['sh-language.js', ...FILES, 'src/i18n/i18n.js'], global: 'FSI18N', event: 'fs-language', languages: ['de-DE'] });
-  assert.equal(I18N.lang, 'de-DE');
-  assert.equal(doc.documentElement.lang, 'de-DE');
-  assert.equal(I18N.T('Confirm deployment'), 'Aufstellung bestätigen');
-  I18N.language.setChoice('fr-CA');
-  assert.equal(I18N.lang, 'fr-CA');
-  assert.equal(events.at(-1), 'fr-CA');
-  assert.equal(I18N.T('Admiral Cipher'), 'Amiral Chiffre');
-  I18N.language.setChoice('es-ES');
-  assert.equal(I18N.T('Deploy all {n} ships first.', { n: 5 }), 'Despliega primero los 5 buques.');
-  assert.ok(I18N.has('Sentinel Carrier') && !I18N.has('Salty Admiral'));
-});
-
-test('graphics and platform strings cover all nine locales', async () => {
+test('platform strings cover all nine locales', async () => {
   const { platformStrings } = await import('../src/ui/platform-i18n.js');
-  const { gfxStrings, pickGfxLocale } = await import('../src/ui/gfx-i18n.js');
   for (const l of ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT']) {
     for (const k of Object.keys(platformStrings('en-US'))) assert.ok(platformStrings(l)[k], `${l} ${k}`);
-    assert.equal(pickGfxLocale(l), l);
-    assert.ok(gfxStrings(l).graphics);
   }
 });

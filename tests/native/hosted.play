@@ -1,0 +1,48 @@
+# Hosted Table (local pass-and-play): two captains signal ready, each deploys
+# behind the "Pass the chart" card, and the first captain takes the first shot
+# by the cursor; then the pause card leaves the match.
+until 600 FLEET SIGNALS
+frames 30
+click =Hosted Table
+until 120 Local pass-and-play
+frames 10
+click =Not ready
+frames 10
+click =Not ready
+frames 10
+save hosted-lobby
+click =Start match
+until 300 Deploy your fleet
+frames 20
+key KeyA 1
+frames 10
+click =Confirm deployment
+until 120 Pass the chart
+frames 10
+save hosted-handover
+click I am Captain 2
+frames 30
+key KeyA 1
+frames 10
+click =Confirm deployment
+until 300 Pass the chart
+frames 10
+click I am Captain 1
+until 600 Your turn
+frames 70
+key ArrowRight 1
+frames 5
+key Enter 1
+frames 5
+key Enter 1
+until 300 Pass the chart
+frames 10
+save hosted-pass
+click I am Captain 2
+until 300 Your turn
+frames 30
+key Escape 1
+until 60 Paused
+frames 10
+click =Leave match
+until 300 FLEET SIGNALS

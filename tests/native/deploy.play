@@ -1,0 +1,49 @@
+# Learn › Lesson 1 (Deploy the fleet): the patrol fleet placed by hand with the
+# cursor keys and Enter (bow at the cursor, the next ship selected after each),
+# confirmed from the tray; the first shot by the cursor (arm, then fire); then
+# Escape opens the pause card and Leave match returns to the title.
+until 600 FLEET SIGNALS
+frames 30
+click =Learn
+until 120 Lesson 1
+frames 10
+click =Start #1
+until 300 Deploy your fleet
+frames 60
+save deploy-start
+key ArrowRight 1
+frames 5
+key Enter 1
+frames 10
+key ArrowDown 1
+frames 3
+key ArrowDown 1
+frames 5
+key Enter 1
+frames 10
+key ArrowDown 1
+frames 3
+key ArrowDown 1
+frames 5
+key Enter 1
+frames 30
+save deploy-placed
+click =Confirm deployment
+until 120 Objective complete
+until 600 Your turn
+frames 70
+key ArrowRight 1
+frames 5
+key Enter 1
+frames 10
+save deploy-armed
+key Enter 1
+frames 10
+until 900 Your turn
+frames 70
+key Escape 1
+until 60 Paused
+frames 10
+save deploy-pause
+click =Leave match
+until 300 FLEET SIGNALS

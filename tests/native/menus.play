@@ -1,0 +1,62 @@
+# The menus: Journey (stage 1's setup, launched and deployed), the Daily
+# Signal and Challenge setups, the Profile with its reset confirmation
+# cancelled, and the title's Settings card.
+until 600 FLEET SIGNALS
+frames 30
+click =Journey  0/40
+until 120 Forty authored engagements
+frames 10
+save journey
+click Stage 1: First Light on the Sound
+until 120 First Light on the Sound
+frames 10
+click =Launch
+until 300 Deploy your fleet
+frames 20
+key KeyA 1
+frames 10
+click =Confirm deployment
+until 600 Your turn
+frames 70
+save journey-battle
+key Escape 1
+until 60 Paused
+frames 10
+click =Leave match
+until 300 FLEET SIGNALS
+frames 10
+click =Daily Signal
+until 120 Daily Signal —
+frames 10
+save daily
+click =Back
+until 120 FLEET SIGNALS
+frames 10
+click =Challenge
+until 120 Constrained engagements
+frames 10
+save challenges
+click =Run #1
+until 120 Challenge goal
+frames 10
+click =Back
+until 120 FLEET SIGNALS
+frames 10
+click =Profile
+until 120 Daily streak
+frames 10
+save profile
+click =Reset all progress
+until 60 Reset everything?
+frames 10
+click =Cancel
+frames 10
+click =Back
+until 120 FLEET SIGNALS
+frames 10
+click =Settings
+until 60 Visual theme
+frames 10
+save title-settings
+click =Done
+until 60 FLEET SIGNALS

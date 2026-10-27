@@ -1,0 +1,56 @@
+# Practice against the Signal Officer: the setup, Auto-deploy (A) and Confirm,
+# a hinted shot (H, Enter), Undo from the tray, Note mode (N) flagging a cell,
+# then the pause card's Settings and Help and back, Resume, and Leave match.
+until 600 FLEET SIGNALS
+frames 30
+click =Play
+until 120 Practice Skirmish
+frames 10
+save practice-setup
+click =Launch
+until 300 Deploy your fleet
+frames 30
+key KeyA 1
+frames 10
+click =Confirm deployment
+until 600 Your turn
+frames 70
+save practice-battle
+key KeyH 1
+frames 5
+key Enter 1
+frames 10
+until 900 Your turn
+frames 70
+click =Undo (U)
+frames 20
+key KeyN 1
+frames 5
+key ArrowDown 1
+frames 5
+key Enter 1
+frames 20
+save practice-note
+expect ⚑
+key Escape 1
+until 60 Paused
+frames 10
+click =Settings
+until 60 Visual theme
+frames 10
+save practice-settings
+click =Done
+frames 10
+click =Help
+until 60 Captain's Manual
+frames 10
+save practice-help
+click =Done
+frames 10
+click =Resume
+frames 20
+key Escape 1
+until 60 Paused
+frames 10
+click =Leave match
+until 300 FLEET SIGNALS
