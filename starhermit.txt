@@ -1,18 +1,57 @@
 name=Fleet Signals
 description=Hide your fleet and call coordinates to locate and sink enemy ships before your own are discovered.
-launch=index.html
 owner=2712e04e-461b-4d23-81ae-e40b429128a8
 server=score-script.js
 cover=cover.jpg
-control.cursorLeft=ArrowLeft | Move cursor left
-control.cursorRight=ArrowRight | Move cursor right
-control.cursorUp=ArrowUp | Move cursor up
-control.cursorDown=ArrowDown | Move cursor down
+
+# StarHermit engine script game: one package, played natively by the
+# StarHermit client and in browsers by the engine's web runtime. Browsers open
+# launch=index.html, the loader `npm run package` writes (it pins the engine
+# on wiki.starhermit.com by hash; never edit it). Re-run `npm run package`
+# after every change and commit index.html + starhermit-files.json.
+launch=index.html
+engine.api=1
+engine.entry=native/main.ts
+engine.version=1.17.0
+engine.minor=19
+engine.capabilities=platform,storage,clipboard
+
+# Keyboard controls (players rebind keys and pads in the runtime's Options).
+# The chart is also played with the pointer or touch: tap a cell to place a
+# ship or arm a target, tap it again (or Fire) to shoot, drag the table to
+# orbit the camera a little; the tray holds every action as a button.
+# The browser build's action names (cursorLeft, autoDeploy, …) were not
+# lower-case, so key choices saved by the old build start from these defaults.
+engine.group.left=Chart cursor
+control.left=ArrowLeft | Move cursor left
+control.right=ArrowRight | Move cursor right
+control.up=ArrowUp | Move cursor up
+control.down=ArrowDown | Move cursor down
 control.confirm=Enter+Space+NumpadEnter | Confirm / fire / place ship
+control.cancel=Backspace | Clear the selection
+engine.group.rotate=Fleet and battle
 control.rotate=KeyR | Rotate ship
-control.autoDeploy=KeyA | Auto-deploy fleet
+control.auto_deploy=KeyA | Auto-deploy fleet
 control.notes=KeyN | Toggle note mode
 control.hint=KeyH | Hint
 control.undo=KeyU | Undo
 control.camera=KeyC | Reset camera
 control.pause=Escape | Pause / cancel
+
+# Gamepad defaults (the browser build's pad mapping, with pads for the tray's
+# actions): D-pad or left stick moves the cursor, A confirms, B clears the
+# selection, Start pauses; Y rotates or auto-deploys, X hints, LB undoes,
+# RB toggles notes, the left stick's press resets the camera.
+engine.gamepad.left=DpadLeft+LeftStickLeft
+engine.gamepad.right=DpadRight+LeftStickRight
+engine.gamepad.up=DpadUp+LeftStickUp
+engine.gamepad.down=DpadDown+LeftStickDown
+engine.gamepad.confirm=South
+engine.gamepad.cancel=East
+engine.gamepad.rotate=North
+engine.gamepad.auto_deploy=Select
+engine.gamepad.hint=West
+engine.gamepad.undo=LeftShoulder
+engine.gamepad.notes=RightShoulder
+engine.gamepad.camera=LeftStickPress
+engine.gamepad.pause=Start

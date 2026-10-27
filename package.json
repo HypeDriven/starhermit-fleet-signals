@@ -1,13 +1,18 @@
 {
   "name": "fleet-signals",
   "version": "1.0.0",
-  "description": "Fleet Signals — hidden-information fleet strategy over a holographic chart table.",
+  "description": "Fleet Signals — hidden-information fleet strategy over a holographic chart table (StarHermit engine script game).",
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "node tests/run.js && node --test tests/platform.test.mjs tests/i18n.test.mjs",
-    "test:e2e": "node tests/e2e.mjs",
-    "serve": "python3 -m http.server 8080"
+    "test": "npm run test:unit && npm run test:native",
+    "test:unit": "node tests/run.js && node --test tests/save.test.mjs tests/i18n.test.mjs",
+    "test:native": "node tests/native.mjs",
+    "test:browser": "node tools/browser-play.mjs .",
+    "plays": "node tools/gen-plays.mjs",
+    "package": "node tools/package-web.mjs",
+    "css": "node tools/css.mjs",
+    "types": "starhermit types ."
   },
   "devDependencies": {
     "playwright-core": "^1.62.1"
