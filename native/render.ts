@@ -31,7 +31,7 @@ import {
   ConeGeometry, CylinderGeometry, DataTexture, DirectionalLight, DoubleSide, Euler, ExtrudeGeometry, Float32BufferAttribute, Fog, Group,
   HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshLambertMaterial, MeshPhysicalMaterial, MeshStandardMaterial,
   OctahedronGeometry, PMREMGenerator, PerspectiveCamera, PlaneGeometry, Points, PointsMaterial, Quaternion, Raycaster, RepeatWrapping,
-  RingGeometry, RoomEnvironment, SRGBColorSpace, Shape, ShaderMaterial, SphereGeometry, Spherical, TorusGeometry, Vector3, Vector4,
+  Box3, OrthographicCamera, PCFSoftShadowMap, RingGeometry, RoomEnvironment, SRGBColorSpace, Shape, ShaderMaterial, SphereGeometry, Spherical, TorusGeometry, Vector3, Vector4,
   pointerToNdc, renderer, scene,
 } from "starhermit:scene";
 import type { Material, Texture } from "starhermit:scene";
@@ -75,12 +75,17 @@ let envTex: Texture | null = null;
 let built = false;
 
 const camera = new PerspectiveCamera(40, 16 / 9, 0.1, 120);
-const keyLight = new DirectionalLight(0xfff2dd, 2.6 / PI);
-const fillLight = new HemisphereLight(0x8fb7d9, 0x1a2433, 1.05 / PI);
+const keyLight = new DirectionalLight(0xfff2dd, 2.6);
+const fillLight = new HemisphereLight(0x8fb7d9, 0x1a2433, 1.05);
 
 /** Standard material with the scene-wide image-based-lighting strength. */
+// three r160 scaled scene.environment by each material's envMapIntensity; r185 (minor 23+) scales
+// only the material's own envMap, so envified materials carry the room as their envMap.
+const envMats = new Set<MeshStandardMaterial>();
 function envify<M extends MeshStandardMaterial>(mat: M, k = 1): M {
   mat.envMapIntensity = 0.32 * k;
+  mat.envMap = scene.environment;
+  envMats.add(mat);
   return mat;
 }
 
@@ -457,7 +462,7 @@ function build(): void {
   keyLight.position.set(8, 12, 6);
   keyLight.shadow.bias = -0.0004;
   keyLight.shadow.normalBias = 0.02;
-  keyLight.shadow.radius = 2;
+  renderer.shadowMap.type = PCFSoftShadowMap;
   scene.add(keyLight, keyLight.target, fillLight);
 
   pedestal.position.y = -0.85;
@@ -466,19 +471,14 @@ function build(): void {
   rim.position.y = -0.02;
   surface.position.y = -0.04;
   surface.receiveShadow = true;
-  // The glass top draws before the holo grids above it (three.js kept the grid
-  // lines through their depth writes; the engine sorts blended objects only).
-  surface.renderOrder = -3;
   engraving.rotation.x = -PI / 2;
   engraving.position.y = 0.004;
   engraving.visible = false;
   engraving.noAO = true;
-  engraving.renderOrder = -2;
   sweep.rotation.x = -PI / 2;
   sweep.position.y = 0.008;
   sweep.visible = false;
   sweep.noAO = true;
-  sweep.renderOrder = -1;
   table.add(pedestal, rim, surface, engraving, sweep);
   scene.add(table);
 
@@ -964,6 +964,7 @@ export function applyLook(next: Look): void {
     try { envTex = new PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture; } catch (e) { console.warn(`environment: ${String(e)}`); }
   }
   scene.environment = next.reflections ? envTex : null;
+  for (const m of envMats) m.envMap = scene.environment;
   if (!prev || prev.water !== next.water || pb!.sea !== next.budget.sea) buildWater();
   waterUniforms.uDetail.value = next.water === "detailed" ? 1 : 0;
   if (!prev || prev.particles !== next.particles || pb!.sparks !== next.budget.sparks) buildParticles();
@@ -1073,11 +1074,28 @@ function animateAmbient(): void {
   wreckMats.forEach((w, i) => { w.emissiveIntensity = 0.14 + 0.1 * Math.max(0, Math.sin(t * 5.3 + i) * Math.sin(t * 2.1)); });
 }
 
-/** The key light's shadow reach covers the table and both boards (the old fitted box). */
+/** Fit the key light's shadow box to the table and both boards (the page's _fitShadow). */
 function fitShadow(): void {
   keyLight.target.position.set(0, 0, 0);
-  // The farthest board corner from the camera's focus, plus the table's rim.
-  keyLight.shadow.distance = 40;
+  const cam = keyLight.shadow.camera as OrthographicCamera;
+  cam.position.copy(keyLight.position);
+  cam.lookAt(keyLight.target.position);
+  cam.updateMatrixWorld();
+  const pts: Vector3[] = [];
+  const add = (x: number, z: number): void => { pts.push(new Vector3(x, -1.7, z), new Vector3(x, 1.4, z)); };
+  for (const dx of [-6.3, 6.3]) for (const dz of [-6.3, 6.3]) add(dx, dz);
+  if (boards) {
+    for (const b of [boards.main, boards.side]) {
+      const h = (b.half + 0.3) * b.group.scale.x;
+      const c = b.group.position;
+      for (const dx of [-h, h]) for (const dz of [-h, h]) add(c.x + dx, c.z + dz);
+    }
+  }
+  const box = new Box3();
+  for (const p of pts) box.expandByPoint(p.applyMatrix4(cam.matrixWorldInverse));
+  cam.left = box.min.x - 0.3; cam.right = box.max.x + 0.3; cam.bottom = box.min.y - 0.3; cam.top = box.max.y + 0.3;
+  cam.near = Math.max(0.1, -box.max.z - 1); cam.far = -box.min.z + 1;
+  cam.updateProjectionMatrix();
 }
 
 // ------------------------------------------------------------------ camera

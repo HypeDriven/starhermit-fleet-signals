@@ -1,6 +1,6 @@
 # Fleet Signals — Game Design Document (running spec)
 
-**Status:** shipped; this document describes the game as it runs today (present tense), a StarHermit engine script game pinned to engine 1.24.0 (host API 1.21, `engine.minor=19`).
+**Status:** shipped; this document describes the game as it runs today (present tense), a StarHermit engine script game pinned to engine 1.26.1 (host API 1.28, `engine.minor=28`).
 **Version markers:** rules v3 (`RULES_VERSION`), content v1 (`CONTENT_VERSION`), save v2 (`SAVE_VERSION`), replay schema 1.
 
 ## 1. Overview
@@ -19,8 +19,8 @@
 
 | Path | Responsibility |
 |---|---|
-| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, `cover=cover.jpg`, `launch=index.html`, `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.24.0`, `engine.minor=19`, `engine.capabilities=platform,storage,clipboard`, `control.*` + `engine.gamepad.*` for every action, `engine.group.*` headings |
-| `index.html`, `starhermit-files.json` | The engine's web loader (pins engine 1.24.0 on wiki.starhermit.com by hash) and the package file index, both written by `npm run package` (`starhermit package --web .`); never edited by hand |
+| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, `cover=cover.jpg`, `launch=index.html`, `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.26.1`, `engine.minor=28`, `engine.capabilities=platform,storage,clipboard`, `control.*` + `engine.gamepad.*` for every action, `engine.group.*` headings |
+| `index.html`, `starhermit-files.json` | The engine's web loader (pins engine 1.26.1 on wiki.starhermit.com by hash) and the package file index, both written by `npm run package` (`starhermit package --web .`); never edited by hand |
 | `native/main.ts` | Entry: start-up (language, styles, platform, look, sounds), the fixed 60 Hz game clock, key/pad actions, pointer and touch on the chart (tap = pick, drag = orbit), the frame loop |
 | `native/app.ts` | Controller (the browser build's `App` without its DOM): screens, match lifecycle (placement editor, countdown, battle, AI pump, hot-seat handover, lessons, results, progression, achievements, local board, leaderboard post, resume), toasts/captions/announcements; timers on the game clock |
 | `native/screens.ts` | Every screen, dialog and the match HUD on `starhermit:ui` (title, setup, Journey, Challenges, Learn, Hosted Table lobby, profile, pause, settings, help, reset, handover, results; top bar, rails/drawers, tray, countdown, toasts, captions, the chart's A–J / 1–10 labels and note marks) |
@@ -167,7 +167,7 @@ Settings, Help and the reset confirmation are dialogs over the current screen (t
 | High | Standard | clearcoated Physical | 1024 px | 512 px | 144 | 1 | 400 | 1× | frosted (blur) | ½ / ½ |
 | Ultra | Standard | clearcoated Physical | 2048 px | 1024 px | 192 | 1.5 | 700 | 1.5× | frosted (blur) | full / full |
 
-**Engine notes.** The water and sonar ShaderMaterials are WGSL with the old math (the water's vertex hook keeps the old shader's object-space wave field); particles are three `PointsMaterial` pools by size class with a soft round dot, fading by colour (additive) where the old point shader shrank them; light intensities are r160's ÷ π; the table's glass top draws before the holo grids (render order).
+**Engine notes.** The water and sonar ShaderMaterials are WGSL with the old math (the water's vertex hook keeps the old shader's object-space wave field); particles are three `PointsMaterial` pools by size class with a soft round dot, fading by colour (additive) where the old point shader shrank them; light intensities, the key light's fitted shadow box (PCF soft) and transparent sorting are r160's as written; the room environment (RoomEnvironment(renderer), as the page) is each envified material's own envMap so its envMapIntensity scales it as r160 did.
 
 **Motion.** Camera: critically damped springs (k = 42), interruptible; shot: 0.55 s parabolic projectile then particles (26 miss / 55 hit / 70 mine / 90 sunk, additive points), a water ripple and tiered shake (0.55 hit, 1.0 sunk/mine). Skip ▸▸ settles every job. Reduced motion: no countdown, 0.12 s shots, no shake, no orbit gesture, instant camera cuts, CSS animations at 0.01 ms. Quality is governed by the Graphics presets (see **Graphics** above).
 
@@ -227,7 +227,7 @@ Conventions follow https://wiki.starhermit.com/ (engine tutorial). Standalone (s
 
 | Feature | Status in this build |
 |---|---|
-| Manifest / launch | `starhermit.txt` (see §1); the web loader `index.html` pins engine 1.24.0 |
+| Manifest / launch | `starhermit.txt` (see §1); the web loader `index.html` pins engine 1.26.1 |
 | Identity | `player()`: signed in, the profile shows "Signed in as <display name>" with the sync state; guests see Offline. The local display name (Profile, 18 chars) names your seat in matches |
 | Sign-in / invite | Title: **Sign in with StarHermit** (`requestSignIn`) when signed out; **Invite a friend** (the invite link, copied with `clipboard.writeText`) when signed in |
 | Cloud save | The v2 save document is the game's `saves` save (schema 2): on the device and in the account, uploads debounced by the runtime; a conflict merges both copies (`mergeDocs`: strict descendant, else `combineSaves`). The browser build's slot (`game:<slug>`, the JS SDK's `saveJSON` text) shows as foreign: it is read (v1 migrated), merged in and replaced once (`replaceForeign`). A match in progress is a device-only snapshot (`storage`, `fleet-signals-resume`). Old browser localStorage progress of guests does not migrate |
