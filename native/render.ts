@@ -985,11 +985,11 @@ export function applyLook(next: Look): void {
     samples: next.ao === "high" ? 16 : 8, resolution: next.budget.aoRes,
     denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
   };
-  // three r160 page: minor 29 bloom follows r185 UnrealBloomPass, so the page strength is squared (pages on r177+ keep theirs).
-  renderer.bloom = next.bloom ? { strength: 0.45 * 0.45, radius: 0.4, threshold: 0.86, resolution: next.budget.bloomRes } : null;
+  // three r160 page: the engine's r160 UnrealBloomPass model (minor 30) at the page's own strength.
+  renderer.bloom = next.bloom ? { strength: 0.45, radius: 0.4, threshold: 0.86, resolution: next.budget.bloomRes, model: "r160" } : null;
   renderer.grade = next.grade ? {
-    space: "display", contrast: 0.11, saturation: 1.1,
-    shadows: [0.95, 0.99, 1.06], highlights: [1.04, 1.0, 0.95], split: [0.25, 0.85],
+    space: "display", contrastCurve: "s", contrast: 0.22, saturation: 1.1,
+    shadows: [0.95, 0.99, 1.06], highlights: [1.04, 1.0, 0.95], split: [0.25, 0.85], levels: [0.975, 0.018],
     vignette: { amount: 0.26, inner: 0.38, outer: 0.9 },
   } : null;
   renderer.antialias = next.antialias;
