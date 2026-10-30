@@ -961,7 +961,9 @@ export function applyLook(next: Look): void {
   fitShadow();
   // Reflections: the PMREM-filtered RoomEnvironment, per-material envMapIntensity (0.32 × k).
   if (next.reflections && !envTex) {
-    try { envTex = new PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture; } catch (e) { console.warn(`environment: ${String(e)}`); }
+    try {
+      const room = new RoomEnvironment(renderer); room.position.y = 0; // the page's three (pre-r183) builds the room at the origin
+      envTex = new PMREMGenerator(renderer).fromScene(room, 0.04).texture; } catch (e) { console.warn(`environment: ${String(e)}`); }
   }
   scene.environment = next.reflections ? envTex : null;
   for (const m of envMats) m.envMap = scene.environment;
