@@ -5,7 +5,7 @@
 // src/platform/save.js), unchanged in behaviour; the screens and HUD are
 // starhermit:ui (screens.ts), the chart table and sea starhermit:scene
 // (render.ts), the controller app.ts, saves and the platform platform.ts.
-import { frame, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
+import { frame, levelSettings, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
 import { gamepads, onAction, onPointerButton, onPointerMove, onTouch } from "starhermit:input";
 import { onSessionEnded } from "starhermit:platform";
 import * as ui from "starhermit:ui";
@@ -151,10 +151,10 @@ function handlePointer(): void {
 let lookKey = "";
 function applyLook(): void {
   const f = frame();
-  const key = `${f.quality}:${f.levelIndex}`;
+  const key = f.level;
   if (key === lookKey) return;
   lookKey = key;
-  const look = lookFor(f.quality, f.levelIndex);
+  const look = lookFor(levelSettings(f.level));
   setHudBlur(look.budget.hudBlur);
   render.applyLook(look);
 }

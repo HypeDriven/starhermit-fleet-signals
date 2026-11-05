@@ -11,8 +11,9 @@
 // synthesized stand-ins the browser build played while a clip decoded are
 // not ported (a live synthesis graph makes clip loads fail on the engine's
 // web runtime; the arrow-exodus port's finding), so a clip still loading is
-// silent. Clips load once the mixer runs (natively at once, in a browser
-// after the first press), one at a time.
+// silent. The clips all load at once in onStart (every loaded clip reaches
+// the mixer, natively and on the web); the sea bed starts once the mixer
+// runs (in a browser after the first press).
 import { context, loadClip, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
 
 export type Cue =
@@ -39,24 +40,18 @@ const GAIN = { effects: 0.9, ambience: 0.6 };
 const INTERFACE = new Set<Cue>(["ui-press", "ui-back"]);
 
 const clips = new Map<string, AudioClip>();
-const queue: string[] = [];
-let loading = false;
-let wantClips = false;
 let suspended = false;
 let ambience: Sound | null = null;
 let captionHook: ((text: string) => void) | null = null;
 /** fn(text) for each cue's caption. */
 export function onCaption(fn: (text: string) => void): void { captionHook = fn; }
 
-function load(name: string): void { if (!queue.includes(name) && !clips.has(name)) queue.push(name); }
-function pump(): void {
-  if (loading || !queue.length) return;
-  const name = queue.shift()!;
-  loading = true;
-  loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); loading = false; }, (e: unknown) => { console.warn(`sfx ${name}: ${String(e)}`); loading = false; });
+/** Loads every clip at once (onStart); a cue whose clip is still loading is skipped. */
+export function loadSfx(): void {
+  for (const name of [AMBIENCE, ...Object.values(SAMPLES)]) {
+    loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); }, (e: unknown) => console.warn(`sfx ${name}: ${String(e)}`));
+  }
 }
-/** Asks for the clips; they load once the mixer runs (see update). */
-export function loadSfx(): void { wantClips = true; }
 
 /** Plays a cue's sample (once loaded) and shows its caption. */
 export function play(name: Cue): void {
@@ -66,7 +61,7 @@ export function play(name: Cue): void {
   if (!clip || suspended) return;
   const bus: Bus = INTERFACE.has(name) ? "interface" : "effects";
   try { playClip(clip, { bus, gain: GAIN.effects }); }
-  catch { clips.delete(file); load(file); } // a clip the mixer lost: load it again
+  catch { /* the mixer is full this frame: skip it */ }
 }
 
 /** A hidden window: the sea bed holds (audio.js suspend). */
@@ -75,17 +70,9 @@ export function setSuspended(on: boolean): void {
   if (on) { try { ambience?.stop(); } catch { /* gone */ } ambience = null; }
 }
 
-/** Each frame: the clips once the mixer runs (one at a time, the sea bed first), then the bed's loop. */
+/** Each frame: the sea bed's loop once the mixer runs (starting it still waits for the mixer). */
 export function update(): void {
-  if (context.state !== "running") return;
-  if (wantClips) {
-    wantClips = false;
-    load(AMBIENCE);
-    for (const name of Object.values(SAMPLES)) load(name);
-    return;
-  }
-  pump();
-  if (suspended || ambience) return;
+  if (context.state !== "running" || suspended || ambience) return;
   const amb = clips.get(AMBIENCE);
   if (!amb) return;
   try {

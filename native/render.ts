@@ -957,7 +957,7 @@ export function applyLook(next: Look): void {
   const shadows = next.shadows > 0;
   renderer.shadowMap.enabled = shadows;
   keyLight.castShadow = shadows;
-  if (shadows) keyLight.shadow.mapSize = next.shadows;
+  if (shadows) keyLight.shadow.mapSize = next.shadows; // the level's size: at minor 23+ the engine keeps the game's mapSize
   fitShadow();
   // Reflections: the PMREM-filtered RoomEnvironment, per-material envMapIntensity (0.32 × k).
   if (next.reflections && !envTex) {
@@ -982,13 +982,14 @@ export function applyLook(next: Look): void {
   // Post: GTAO for contact darkening, bloom on emissive highlights only (threshold 0.86),
   // the colour grade (gentle S-curve, +10 % saturation, cool shadows / warm highlights,
   // vignette) after the output, and FXAA / SMAA / MSAA.
-  renderer.ao = next.ao === "off" ? null : {
-    blendIntensity: next.ao === "high" ? 0.7 : 0.55, radius: 0.45, distanceExponent: 1.4, thickness: 1.0, scale: 1.0,
-    samples: next.ao === "high" ? 16 : 8, resolution: next.budget.aoRes,
-    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
+  const ao = next.ao, fullAo = !!ao && ao.resolution >= 1; // the engine's "high" AO: full resolution
+  renderer.ao = ao && {
+    blendIntensity: fullAo ? 0.7 : 0.55, radius: 0.45, distanceExponent: 1.4, thickness: 1.0, scale: 1.0,
+    samples: ao.samples, resolution: ao.resolution,
+    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: fullAo ? 6 : 4, rings: 2, samples: ao.denoiseSamples, radiusExponent: 2 },
   };
   // three r160 page: the engine's r160 UnrealBloomPass model (minor 30) at the page's own strength.
-  renderer.bloom = next.bloom ? { strength: 0.45, radius: 0.4, threshold: 0.86, resolution: next.budget.bloomRes, model: "r160" } : null;
+  renderer.bloom = next.bloom === null ? null : { strength: 0.45, radius: 0.4, threshold: 0.86, resolution: next.bloom, model: "r160" };
   renderer.grade = next.grade ? {
     space: "display", contrastCurve: "s", contrast: 0.22, saturation: 1.1,
     shadows: [0.95, 0.99, 1.06], highlights: [1.04, 1.0, 0.95], split: [0.25, 0.85], levels: [0.975, 0.018],

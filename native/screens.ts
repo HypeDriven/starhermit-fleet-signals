@@ -47,8 +47,19 @@ function textWidth(text: string, style: string[], kind: "button" | "label" = "bu
   return ui.measureText(text, { kind, style }).width / SCALE;
 }
 type Item = { label: string; cls?: string; opts?: ui.ButtonOptions; run: () => void; id?: string; full?: boolean; cue?: "ui-press" | "ui-back" | null };
-/** Wraps buttons into rows that fit `width` (rows do not flex-wrap); `grow` stretches each row's buttons (flex: 1 1 140px). */
+function rowButton(it: Item, each = 0): void {
+  const style = each ? ui.style(it.cls || "btn", { width: each }) : ui.style(it.cls || "btn");
+  const pressed = (it.id ? style.id(it.id) : style).button(it.label, it.opts ?? {});
+  if (pressed) { if (it.cue !== null) A.play(it.cue ?? "ui-press"); it.run(); }
+}
+/** Buttons in rows that wrap at `width` (the engine's wrapping row, CSS flex-wrap); `grow` stretches each
+ * line's buttons (flex: 1 1 140px) and a `full` item takes a line of its own, which need the lines, so those
+ * cases still pack them here. */
 function buttonRows(id: string, items: Item[], width: number, { justify = "center" as ui.Align, grow = false, gap = 10 } = {}): void {
+  if (!grow && !items.some((it) => it.full)) {
+    ui.row(`${id}-rows`, () => { for (const it of items) rowButton(it); }, { wrap: true, width, gap, justify });
+    return;
+  }
   const rows: Item[][] = [];
   let cur: Item[] = [], used = 0;
   for (const it of items) {
@@ -62,11 +73,7 @@ function buttonRows(id: string, items: Item[], width: number, { justify = "cente
   ui.column(`${id}-rows`, () => {
     rows.forEach((row, ri) => ui.row(`${id}-r${ri}`, () => {
       const each = grow || row.some((r) => r.full) ? (width - gap * (row.length - 1)) / row.length : 0;
-      for (const it of row) {
-        const style = each ? ui.style(it.cls || "btn", { width: each }) : ui.style(it.cls || "btn");
-        const pressed = (it.id ? style.id(it.id) : style).button(it.label, it.opts ?? {});
-        if (pressed) { if (it.cue !== null) A.play(it.cue ?? "ui-press"); it.run(); }
-      }
+      for (const it of row) rowButton(it, each);
     }, { spacing: gap, justify, width }));
   }, { spacing: gap, width });
 }

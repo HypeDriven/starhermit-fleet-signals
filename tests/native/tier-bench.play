@@ -1,0 +1,36 @@
+# Graphics-tier bench (tools/engine-tier-bench.mjs): Practice against the Signal Officer, Auto-deploy
+# and Confirm, then three hinted shots and the Officer's replies measured: shells, splashes or hits
+# with sparks, the animated sea, sonar sweep and bobbing buoys.
+until 600 FLEET SIGNALS
+frames 30
+click =Play
+until 120 Practice Skirmish
+frames 10
+click =Launch
+until 300 Deploy your fleet
+frames 30
+key KeyA 1
+frames 10
+click =Confirm deployment
+until 600 Your turn
+frames 120
+measure start
+key KeyH 1
+frames 5
+key Enter 1
+frames 10
+until 900 Your turn
+frames 40
+key KeyH 1
+frames 5
+key Enter 1
+frames 10
+until 900 Your turn
+frames 40
+key KeyH 1
+frames 5
+key Enter 1
+frames 10
+until 900 Your turn
+frames 200
+measure stop
