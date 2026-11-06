@@ -7,13 +7,12 @@
 // Confirm / Fire on a row of its own; short landscape windows a tighter HUD.
 // The chart's A–J / 1–10 labels (the old projected label layer) and the
 // private notes are drawn over the scene at the cells' window positions.
-import { frame, openMenu } from "starhermit:engine";
+import { frame, openMenu, strings } from "starhermit:engine";
 import { bindingLabel } from "starhermit:input";
 import * as draw from "starhermit:draw";
 import * as ui from "starhermit:ui";
 import * as E from "../src/rules/engine.js";
 import { CHALLENGES, challengeById } from "../src/content/stages.js";
-import { platformStrings } from "../src/ui/platform-i18n.js";
 import { PALETTE_IDS } from "../src/platform/options.js";
 import { N, T, pname } from "./i18n.ts";
 import * as render from "./render.ts";
@@ -23,16 +22,14 @@ import { app, AI_NAMES, ACHIEVEMENTS, LESSONS, STAGES, THEMES } from "./app.ts";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
-const PT = (): Record<string, string> => platformStrings() as Record<string, string>;
 
 // ------------------------------------------------------------------ viewport and helpers
 let VW = 1280, VH = 720, SCALE = 1;
 function measureViewport(): void {
-  const f = frame();
-  SCALE = ui.preferences().scale || 1;
-  const sa = f.safeArea;
-  VW = Math.max(1, (f.width - sa.left - sa.right) / SCALE);
-  VH = Math.max(1, (f.height - sa.top - sa.bottom) / SCALE);
+  const v = ui.viewport!();
+  SCALE = v.scale || 1;
+  VW = Math.max(1, v.width);
+  VH = Math.max(1, v.height);
 }
 const wide = (): boolean => VW >= 1024 && VH > 500;
 const phone = (): boolean => VW <= 700 && VH > VW;
@@ -108,7 +105,6 @@ function factTable(id: string, rows: [string, string][], width: number, label = 
 
 // ------------------------------------------------------------------ title
 function titleScreen(): void {
-  const P = PT();
   screen("title", 560, (w) => {
     // Key art strip above the title (≤ 26 vh, ≤ 220 px; hidden under 560 px tall).
     if (VH >= 560) ui.column("title-art", () => { /* the art is the box's background */ }, { width: w, height: Math.min(220, VH * 0.26, w * 9 / 16), style: "title-art-img" });
@@ -132,8 +128,8 @@ function titleScreen(): void {
         { id: "learn", label: T("Learn"), run: () => A.go("learn") },
         { id: "hosted", label: T("Hosted Table"), run: () => A.showLobby() },
       ], w, { grow: true });
-      if (!platform.signedIn()) buttonRows("menu-account", [{ label: P.signIn!, cls: "btn-ghost", run: () => A.signIn() }], w);
-      else if (platform.inviteLink()) buttonRows("menu-account", [{ label: P.invite!, cls: "btn-ghost", run: () => A.copyInvite() }], w);
+      if (!platform.signedIn()) buttonRows("menu-account", [{ label: strings.t("starhermit.signIn"), cls: "btn-ghost", run: () => A.signIn() }], w);
+      else if (platform.inviteLink()) buttonRows("menu-account", [{ label: strings.t("starhermit.invite"), cls: "btn-ghost", run: () => A.copyInvite() }], w);
       buttonRows("menu-4", [
         { id: "profile", label: T("Profile"), cls: "btn-ghost", run: () => A.go("profile") },
         { id: "settings", label: T("Settings"), cls: "btn-ghost", run: () => A.openModal({ kind: "settings" }) },
@@ -267,7 +263,7 @@ function lobbyScreen(): void {
   const seats = app.lobbySeats!;
   screen("lobby", 640, (w) => {
     ui.row("lobby-head", () => { heading(T("Hosted Table")); badge(T("Local pass-and-play")); }, { spacing: 8, align: "center" });
-    para(T("Two to four captains share this table. The chart is hidden between turns — hand the device over when prompted. Placement and shots are validated by the same authoritative script that runs online sessions (server.js); reconnecting mid-match restores the last snapshot from the title screen."), w);
+    para(T("hostedTableIntro"), w);
     ui.column(T("Roster"), () => {
       seats.forEach((s, i) => {
         const readyLabel = s.ready ? T("Ready") : T("Not ready");
@@ -545,21 +541,6 @@ function gameHud(): void {
 }
 
 // ------------------------------------------------------------------ toasts and captions
-function toasts(): void {
-  if (!app.toasts.length) return;
-  const top = app.screen === "game" ? hudRects.top / SCALE + 6 : 70;
-  ui.place("toasts", { anchor: "top", y: top }, () => {
-    for (const t of app.toasts) {
-      const max = Math.min(VW * 0.9, 560);
-      const cls = t.error ? "toast-error-text" : "toast-text";
-      const tw = textWidth(t.text, [cls], "label");
-      ui.column(`toast-${t.until}`, () => {
-        if (tw <= max - 32) ui.style(cls, { text: { align: "center" } }).label(t.text);
-        else ui.style(cls, { text: { align: "center" } }).paragraph(t.text, max - 32);
-      }, { style: t.error ? "toast-error" : "toast" });
-    }
-  }, { spacing: 6, align: "center" });
-}
 function captionLine(): void {
   const c = app.caption;
   if (!c || !A.options().captions) return;
@@ -732,7 +713,9 @@ export function drawScreens(): void {
     case "profile": profileScreen(); break;
     case "game": gameHud(); break;
   }
-  toasts();
+  // ui.toast's stack, past its 16 px margin: below the HUD in a match (measured from its first
+  // laid-out frame: a toast stays where it is born), under the top bar elsewhere.
+  if (app.screen !== "game" || hudRects.top > 0) A.showToasts(Math.max(0, (app.screen === "game" ? hudRects.top / SCALE + 6 : 70) - 16));
   captionLine();
   dialogs();
 }

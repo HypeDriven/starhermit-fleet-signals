@@ -16,7 +16,6 @@ import {
 import {
   createSession, handleMessage, getSnapshot, checkDeadline, sessionSummary,
 } from '../server.js';
-import { matchLocale } from '../src/i18n/core.js';
 
 let passed = 0;
 let failed = 0;
@@ -664,14 +663,6 @@ test('golden: scripted easy/medium/hard sessions match pinned hashes', () => {
 });
 
 /* save, options and foreign-save tests live in tests/save.test.mjs (node --test) */
-
-/* ==================== locales ==================== */
-
-test('locale: BCP 47 tags map to the nearest shipped locale', () => {
-  eq(matchLocale('es-MX'), 'es-419'); eq(matchLocale('es-ES'), 'es-ES'); eq(matchLocale('fr-CA'), 'fr-CA');
-  eq(matchLocale('fr'), 'fr-FR'); eq(matchLocale('en-AU'), 'en-GB'); eq(matchLocale('en'), 'en-US');
-  eq(matchLocale('pt-PT'), 'pt-BR'); eq(matchLocale('de-AT'), 'de-DE'); eq(matchLocale('it'), 'it-IT'); eq(matchLocale('ja-JP'), 'en-US');
-});
 
 test('session: elapsed time runs on the injected clock (the engine game clock)', () => {
   let now = 5000;

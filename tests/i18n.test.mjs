@@ -7,15 +7,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { loadTables, codeKeys, audit } from './i18n-common.mjs';
+import { codeKeys, audit } from './i18n-common.mjs';
 import { STAGES, CHALLENGES, THEMES } from '../src/content/stages.js';
 import { LESSONS } from '../src/content/tutorial.js';
 import { FLEETS } from '../src/rules/engine.js';
-import { createI18n } from '../src/i18n/core.js';
 
 const ROOT = new URL('../', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
-const FILES = ['src/i18n/strings.js', 'src/i18n/strings-content.js'];
+const TABLES = JSON.parse(read('assets/strings.json'));
 const NATIVE = readdirSync(new URL('native/', ROOT)).filter((f) => f.endsWith('.ts')).map((f) => 'native/' + f);
 
 export function usedKeys() {
@@ -40,27 +39,14 @@ export function usedKeys() {
 }
 
 test('every used key is translated in every locale; placeholders intact; no unused rows', () => {
-  assert.deepEqual(audit(loadTables(ROOT, FILES, 'FS_STRINGS'), usedKeys()), []);
+  assert.deepEqual(audit(TABLES, usedKeys()), []);
 });
 
-test('the lookup follows the interface language and switches live', () => {
-  const I = createI18n(loadTables(ROOT, FILES, 'FS_STRINGS'));
-  assert.equal(I.T('Confirm deployment'), 'Confirm deployment');
-  I.setLocale('de-DE');
-  assert.equal(I.T('Confirm deployment'), 'Aufstellung bestätigen');
-  I.setLocale('fr-CA');
-  assert.equal(I.lang, 'fr-CA');
-  assert.equal(I.T('Admiral Cipher'), 'Amiral Chiffre');
-  I.setLocale('es-ES');
-  assert.equal(I.T('Deploy all {n} ships first.', { n: 5 }), 'Despliega primero los 5 buques.');
-  I.setLocale('en-GB');
-  assert.equal(I.T('Color-vision palette'), 'Colour-vision palette');
-  assert.ok(I.has('Sentinel Carrier') && !I.has('Salty Admiral'));
-});
-
-test('platform strings cover all nine locales', async () => {
-  const { platformStrings } = await import('../src/ui/platform-i18n.js');
-  for (const l of ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT']) {
-    for (const k of Object.keys(platformStrings('en-US'))) assert.ok(platformStrings(l)[k], `${l} ${k}`);
-  }
+test('the tables hold every locale and the regional differences', () => {
+  assert.equal(TABLES['en-US']['Confirm deployment'], 'Confirm deployment');
+  assert.equal(TABLES['de-DE']['Confirm deployment'], 'Aufstellung bestätigen');
+  assert.equal(TABLES['fr-FR']['Admiral Cipher'], 'Amiral Chiffre');
+  assert.equal(TABLES['es-419']['Deploy all {n} ships first.'], 'Despliega primero los {n} buques.');
+  assert.equal(TABLES['en-GB']['Color-vision palette'], 'Colour-vision palette');
+  assert.ok(TABLES['en-US']['Sentinel Carrier'] && !TABLES['en-US']['Salty Admiral']);
 });

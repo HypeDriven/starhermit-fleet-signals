@@ -11,7 +11,7 @@
 // settling, the results' delay) run on the game clock (`clock`, advanced in
 // fixed steps by main.ts), not setTimeout: they pause while the window is
 // suspended and are deterministic in checks.
-import { clipboard } from "starhermit:engine";
+import { clipboard, strings } from "starhermit:engine";
 import { requestSignIn } from "starhermit:platform";
 import { vibrate as padVibrate } from "starhermit:input";
 import * as ui from "starhermit:ui";
@@ -21,7 +21,6 @@ import { GameSession } from "../src/session/session.js";
 import { STAGES, THEMES, dailyStage, stageById, challengeById, CONTENT_VERSION } from "../src/content/stages.js";
 import { LESSONS, lessonById } from "../src/content/tutorial.js";
 import { ACHIEVEMENTS, unlockAchievement, recordBoardEntry } from "../src/platform/save.js";
-import { platformStrings } from "../src/ui/platform-i18n.js";
 import { N, T, pname } from "./i18n.ts";
 import * as render from "./render.ts";
 import * as audio from "./audio.ts";
@@ -71,7 +70,6 @@ export type Modal =
   | { kind: "reset" }
   | { kind: "handover"; name: string; ready: () => void }
   | { kind: "results" };
-export type Toast = { text: string; error: boolean; until: number };
 export interface Placement { placements: Map<string, Any>; selectedShipId: string | null; dir: "h" | "v" }
 export interface Seat { id: string; name: string; ready: boolean }
 
@@ -81,7 +79,6 @@ export const app = {
   /** The frame (fixed-step count) a screen or modal opened: its opening key must not act on it. */
   openedAt: 0,
   modals: [] as Modal[],
-  toasts: [] as Toast[],
   caption: null as null | { text: string; until: number },
   forms: {} as Record<string, Any>,
   // the match
@@ -123,7 +120,6 @@ export function tick(stepMs: number): void {
     timers = timers.filter((t) => t.at > clock.ms);
     for (const t of due) t.fn();
   }
-  app.toasts = app.toasts.filter((t) => t.until > clock.ms);
   if (app.caption && app.caption.until <= clock.ms) app.caption = null;
 }
 // The AI's thinking pause (650–1050 ms in the browser build) from a seeded stream.
@@ -138,10 +134,21 @@ export function announce(msg: string, assertive = false): void {
   if (!msg) return;
   try { ui.announce(String(msg).slice(0, 500), { politeness: assertive ? "assertive" : "polite" }); } catch { /* empty */ }
 }
+const liveToasts: { toast: ReturnType<NonNullable<typeof ui.toast>>; until: number }[] = [];
+const waitingToasts: { msg: string; isError: boolean; ms: number }[] = [];
 export function toast(msg: string, isError = false, ms = 2600): void {
-  app.toasts.push({ text: msg, error: isError, until: clock.ms + ms });
-  if (app.toasts.length > 4) app.toasts.shift();
+  waitingToasts.push({ msg, isError, ms });
   if (isError) announce(msg, true);
+}
+/** Shows the frame's new toasts, after the HUD is drawn: offset is below this frame's HUD. */
+export function showToasts(offset: number): void {
+  for (const { msg, isError, ms } of waitingToasts.splice(0)) {
+    // The stack holds three and queues the rest: the oldest makes way, so a new line shows at once.
+    while (liveToasts.length && liveToasts[0]!.until <= clock.ms) liveToasts.shift();
+    if (liveToasts.length >= 3) liveToasts.shift()!.toast?.dismiss();
+    const handle = ui.toast!(msg, { duration: ms / 1000, style: isError ? ["toast-error", "toast-error-text"] : ["toast", "toast-text"], dismissible: false, announce: false, position: "top", offset });
+    liveToasts.push({ toast: handle, until: clock.ms + ms });
+  }
 }
 audio.onCaption((text) => { if (platform.options.captions) app.caption = { text, until: clock.ms + 1800 }; });
 
@@ -228,8 +235,7 @@ export function lobbyStart(): void {
 export function copyInvite(): void {
   const link = platform.inviteLink();
   if (!link) return;
-  const ps = platformStrings() as Record<string, string>;
-  try { clipboard.writeText(link); toast(ps.inviteCopied!); } catch { toast(ps.inviteFailed!, true); }
+  try { clipboard.writeText(link); toast(strings.t("starhermit.inviteCopied")); } catch { toast(strings.t("starhermit.inviteFailed"), true); }
 }
 export function signIn(): void { void requestSignIn().catch(() => undefined); }
 export function saveProfileName(name: string): void {
@@ -848,12 +854,11 @@ function showResults(): void {
   // Signed in only: post a ranked match (not practice, learn or hot-seat) and show the board rank.
   app.lbLine = null;
   if (app.lastResult.post && platform.signedIn()) {
-    const ps = platformStrings() as Record<string, string>;
-    app.lbLine = ps.lbPosting!;
+    app.lbLine = strings.t("starhermit.leaderboardPosting");
     const sess = app.session;
     void platform.postLeaderboard(res.total).then((r) => {
       if (app.session !== sess) return;
-      app.lbLine = !r.posted ? ps.lbNotPosted! : r.rank ? ps.lbRank!.replace("{rank}", String(r.rank)) : ps.lbPosted!;
+      app.lbLine = !r.posted ? strings.t("starhermit.leaderboardNotPosted") : r.rank ? strings.t("starhermit.leaderboardRank", { rank: r.rank }) : strings.t("starhermit.leaderboardPosted");
     });
   }
 }

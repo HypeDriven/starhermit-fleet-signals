@@ -5,13 +5,12 @@
 // src/platform/save.js), unchanged in behaviour; the screens and HUD are
 // starhermit:ui (screens.ts), the chart table and sea starhermit:scene
 // (render.ts), the controller app.ts, saves and the platform platform.ts.
-import { frame, levelSettings, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
+import { frame, levelSettings, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate, strings } from "starhermit:engine";
 import { gamepads, onAction, onPointerButton, onPointerMove, onTouch } from "starhermit:input";
 import { onSessionEnded } from "starhermit:platform";
 import * as ui from "starhermit:ui";
 import { setSessionClock } from "../src/session/session.js";
-import { platformStrings } from "../src/ui/platform-i18n.js";
-import { initLanguage, T } from "./i18n.ts";
+import { T } from "./i18n.ts";
 import * as render from "./render.ts";
 import * as audio from "./audio.ts";
 import * as platform from "./platform.ts";
@@ -27,7 +26,6 @@ setSessionClock(() => A.clock.ms);
 
 onStart(() => {
   setFixedRate(60);
-  initLanguage();
   initStyles();
   platform.initPlatform();
   platform.onOptionsChange(() => A.applySettings());
@@ -38,7 +36,7 @@ onStart(() => {
   A.showTitle();
 });
 onPreferencesChange((p) => render.setReducedMotion(p.reducedMotion));
-onSessionEnded(() => A.toast((platformStrings() as Record<string, string>).signedOut!, false, 4000));
+onSessionEnded(() => A.toast(strings.t("starhermit.signedOut"), false, 4000));
 
 let hidden = false;
 onSuspend(() => {
