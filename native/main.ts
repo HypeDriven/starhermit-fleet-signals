@@ -1,3 +1,4 @@
+import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // Fleet Signals on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
 // the engine's web runtime. The rules, AI, content, sessions and saves are
@@ -169,10 +170,14 @@ onUpdate((dt) => {
   // The first pad (App._wireGamepad's connection toast).
   if (!padSeen && gamepads().some((g) => g.connected)) { padSeen = true; A.toast(T("Gamepad connected — stick aims, A confirms, B cancels.")); }
 });
-onRender(() => {
+onRender(__l10nRender(() => {
   drawScreens();
   handlePointer();
   const f = frame();
   render.update(frameDt, f.width, f.height, hidden);
-});
+}));
 
+
+// localization-runtime:menu
+import { installLanguageMenu as __installLanguageMenu } from "./l10n/menu.ts";
+__installLanguageMenu(false);

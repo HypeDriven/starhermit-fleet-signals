@@ -1,3 +1,7 @@
+import { localizedStyle as __l10nStyle } from "./l10n/font.ts";
+import { localizedDrawOptions as __l10nDrawOptions } from "./l10n/font.ts";
+// localization-runtime:attached
+import { openLocalizedOptions as __l10nOptions } from "./l10n/menu.ts";
 // Every screen, dialog and the in-match HUD on starhermit:ui, drawn each
 // frame from the app's state (the browser build's HTML templates in
 // src/ui/app.js and the layout rules of src/ui/styles.css). Layout follows
@@ -7,7 +11,16 @@
 // Confirm / Fire on a row of its own; short landscape windows a tighter HUD.
 // The chart's A–J / 1–10 labels (the old projected label layer) and the
 // private notes are drawn over the scene at the cells' window positions.
-import { frame, openMenu, strings } from "starhermit:engine";
+// Every screen, dialog and the in-match HUD on starhermit:ui, drawn each
+// frame from the app's state (the browser build's HTML templates in
+// src/ui/app.js and the layout rules of src/ui/styles.css). Layout follows
+// the old style sheet's breakpoints: rails beside the chart on wide windows
+// (1024 logical px and up); drawers over it, toggled from the top bar, on
+// compact ones; on phones held upright a two-row top bar and a tray with
+// Confirm / Fire on a row of its own; short landscape windows a tighter HUD.
+// The chart's A–J / 1–10 labels (the old projected label layer) and the
+// private notes are drawn over the scene at the cells' window positions.
+import { frame, strings } from "starhermit:engine";
 import { bindingLabel } from "starhermit:input";
 import * as draw from "starhermit:draw";
 import * as ui from "starhermit:ui";
@@ -37,15 +50,15 @@ const shortLandscape = (): boolean => VH <= 500 && VW > VH;
 let hudBlur = false;
 export function setHudBlur(v: boolean): void { hudBlur = v; }
 
-function lbl(text: string, cls = "text"): void { ui.style(cls).label(text); }
-function para(text: string, width: number, cls = "text"): void { ui.style(cls).paragraph(text, Math.max(40, width)); }
-function heading(text: string, cls = "h2"): void { ui.style(cls).heading(text); }
+function lbl(text: string, cls = "text"): void { ui.style(__l10nStyle(cls)).label(text); }
+function para(text: string, width: number, cls = "text"): void { ui.style(__l10nStyle(cls)).paragraph(text, Math.max(40, width)); }
+function heading(text: string, cls = "h2"): void { ui.style(__l10nStyle(cls)).heading(text); }
 function textWidth(text: string, style: string[], kind: "button" | "label" = "button"): number {
   return ui.measureText(text, { kind, style }).width / SCALE;
 }
 type Item = { label: string; cls?: string; opts?: ui.ButtonOptions; run: () => void; id?: string; full?: boolean; cue?: "ui-press" | "ui-back" | null };
 function rowButton(it: Item, each = 0): void {
-  const style = each ? ui.style(it.cls || "btn", { width: each }) : ui.style(it.cls || "btn");
+  const style = each ? ui.style(__l10nStyle(it.cls || "btn"), __l10nStyle({ width: each })) : ui.style(__l10nStyle(it.cls || "btn"));
   const pressed = (it.id ? style.id(it.id) : style).button(it.label, it.opts ?? {});
   if (pressed) { if (it.cue !== null) A.play(it.cue ?? "ui-press"); it.run(); }
 }
@@ -109,12 +122,12 @@ function titleScreen(): void {
     // Key art strip above the title (≤ 26 vh, ≤ 220 px; hidden under 560 px tall).
     if (VH >= 560) ui.column("title-art", () => { /* the art is the box's background */ }, { width: w, height: Math.min(220, VH * 0.26, w * 9 / 16), style: "title-art-img" });
     ui.column("title-block", () => {
-      ui.style("game-title", { text: { size: Math.max(30, Math.min(41.6, VW * 0.09)) } }).heading("FLEET SIGNALS");
-      ui.style("game-subtitle", { text: { align: "center" } }).paragraph(T("A captain's holographic chart table. Hide your fleet. Read the water."), w);
+      ui.style(__l10nStyle("game-title"), __l10nStyle({ text: { size: Math.max(30, Math.min(41.6, VW * 0.09)) } })).heading("FLEET SIGNALS");
+      ui.style(__l10nStyle("game-subtitle"), __l10nStyle({ text: { align: "center" } })).paragraph(T("A captain's holographic chart table. Hide your fleet. Read the water."), w);
     }, { align: "center", spacing: 4, width: w, padding: { bottom: 14 } });
     ui.id("title-menu").column(T("Fleet Signals title"), () => {
-      if (A.resumeAvailable()) { if (ui.id("resume").style("btn-primary", "btn-play").button(T("Resume Match"))) { A.play("ui-press"); A.resumeMatch(); } }
-      if (ui.id("play").style("btn-primary", "btn-play").button(T("Play"))) { A.play("ui-press"); A.showSetup("practice"); }
+      if (A.resumeAvailable()) { if (ui.id("resume").style(__l10nStyle("btn-primary"), __l10nStyle("btn-play")).button(T("Resume Match"))) { A.play("ui-press"); A.resumeMatch(); } }
+      if (ui.id("play").style(__l10nStyle("btn-primary"), __l10nStyle("btn-play")).button(T("Play"))) { A.play("ui-press"); A.showSetup("practice"); }
       const daily = A.dailyDone() ? `${T("Daily Signal")} ✓` : T("Daily Signal");
       buttonRows("menu-1", [
         { id: "daily", label: daily, run: () => A.showSetup("daily") },
@@ -212,11 +225,11 @@ function journeyScreen(): void {
         const locked = i >= limit;
         const name = locked ? T("Stage {n}: {name} (locked)", { n: s.index, name: T(s.name) })
           : rec ? T("Stage {n}: {name}, {stars} stars", { n: s.index, name: T(s.name), stars: rec.stars }) : T("Stage {n}: {name}", { n: s.index, name: T(s.name) });
-        const hit = ui.id(`stage-${s.id}`).style("stage-cell", s.mastery && "stage-mastery", { width: cell, height: Math.max(64, cell) }).button(name, {
+        const hit = ui.id(`stage-${s.id}`).style(__l10nStyle("stage-cell"), __l10nStyle(s.mastery && "stage-mastery"), __l10nStyle({ width: cell, height: Math.max(64, cell) })).button(name, {
           disabled: locked,
           content: () => {
-            ui.style("text", { text: { align: "center", size: 13.6 } }).label(`${s.index}${s.mastery ? " ◆" : ""}`);
-            if (rec) ui.style("stars", { text: { size: 11 } }).label("★".repeat(rec.stars) + "☆".repeat(3 - rec.stars));
+            ui.style(__l10nStyle("text"), __l10nStyle({ text: { align: "center", size: 13.6 } })).label(`${s.index}${s.mastery ? " ◆" : ""}`);
+            if (rec) ui.style(__l10nStyle("stars"), __l10nStyle({ text: { size: 11 } })).label("★".repeat(rec.stars) + "☆".repeat(3 - rec.stars));
           },
         });
         if (hit && !locked) { A.play("ui-press"); A.showSetup("journey", s); }
@@ -233,7 +246,7 @@ function listRow(id: string, w: number, title: string, small: string, extra: str
       ui.row(`${id}-title`, () => { lbl(title, "strong"); if (extra) badge(extra); }, { spacing: 6, align: "center" });
       para(small, w - bw - 12, "small");
     }, { spacing: 2, width: w - bw - 12 });
-    if (ui.id(`${id}-go`).style("btn").button(action)) { A.play("ui-press"); run(); }
+    if (ui.id(`${id}-go`).style(__l10nStyle("btn")).button(action)) { A.play("ui-press"); run(); }
   }, { width: w, spacing: 12, align: "center", style: "list-row" });
 }
 function challengesScreen(): void {
@@ -275,8 +288,8 @@ function lobbyScreen(): void {
             const name = ui.textField(`seat-name-${s.id}`, s.name, { maxChars: 18, width: Math.max(80, w - rw - dw - 12 - 36) });
             if (name !== s.name) s.name = name.slice(0, 18);
           });
-          if (ui.id(`seat-ready-${s.id}`).style("btn", s.ready && "btn-primary").button(readyLabel, { selected: s.ready })) { s.ready = !s.ready; A.play("ui-press"); }
-          if (seats.length > 2 && ui.id(`seat-drop-${s.id}`).style("btn-ghost").button(T("Remove player {n}", { n: i + 1 }), { content: () => ui.label("✕") })) { seats.splice(i, 1); A.play("ui-back"); }
+          if (ui.id(`seat-ready-${s.id}`).style(__l10nStyle("btn"), __l10nStyle(s.ready && "btn-primary")).button(readyLabel, { selected: s.ready })) { s.ready = !s.ready; A.play("ui-press"); }
+          if (seats.length > 2 && ui.id(`seat-drop-${s.id}`).style(__l10nStyle("btn-ghost")).button(T("Remove player {n}", { n: i + 1 }), { content: () => ui.label("✕") })) { seats.splice(i, 1); A.play("ui-back"); }
         }, { width: w, spacing: 12, align: "center", style: s.ready ? "list-row" : "list-row" });
       });
     }, { width: w, spacing: 0 });
@@ -319,15 +332,15 @@ function profileScreen(): void {
     const cw = (w - gap * (cols - 1)) / cols;
     ui.grid(T("Career statistics"), () => {
       for (const [num, label] of stats) ui.id(`stat-${label}`).column(label, () => {
-        ui.style("stat-num", { text: { align: "center" } }).label(num);
-        ui.style("stat-label", { text: { align: "center" } }).label(label);
+        ui.style(__l10nStyle("stat-num"), __l10nStyle({ text: { align: "center" } })).label(num);
+        ui.style(__l10nStyle("stat-label"), __l10nStyle({ text: { align: "center" } })).label(label);
       }, { style: "stat-box", align: "center", spacing: 2, width: cw });
     }, { columns: cols, gap, width: w, align: "stretch" });
     heading(T("Achievements"), "h3");
     for (const a of ACHIEVEMENTS) {
       const unlocked = d.achievements[a.key];
       ui.row(`ach-${a.key}`, () => {
-        ui.style("text", { width: 34, text: { size: 22, align: "center" } }).label(ACH_ICONS[a.key] || "★");
+        ui.style(__l10nStyle("text"), __l10nStyle({ width: 34, text: { size: 22, align: "center" } })).label(ACH_ICONS[a.key] || "★");
         ui.column(`ach-${a.key}-t`, () => { lbl(T(a.name), "strong"); para(T(a.description), w - 34 - 140, "small"); }, { spacing: 2, width: w - 34 - 140 });
         lbl(unlocked ? "✓ " + String(unlocked).slice(0, 10) : T("Locked"), "dim");
       }, { width: w, spacing: 10, align: "center", style: unlocked ? "list-row" : "list-row-locked" });
@@ -359,22 +372,22 @@ function hudTop(): void {
   const isPhone = phone();
   const pad = shortLandscape() ? { top: 4, bottom: 4, start: 8, end: 8 } : { top: 8, bottom: 8, start: 12, end: 12 };
   const r = ui.place("hud-top", "top-start", () => {
-    const pauseBtn = (): void => { if (ui.id("pause").style("btn-ghost").button(T("Pause"), { content: () => ui.style("strong", { text: { size: 18 } }).label("❚❚") })) { A.showPause(); } };
+    const pauseBtn = (): void => { if (ui.id("pause").style(__l10nStyle("btn-ghost")).button(T("Pause"), { content: () => ui.style(__l10nStyle("strong"), __l10nStyle({ text: { size: 18 } })).label("❚❚") })) { A.showPause(); } };
     const objective = (width: number): void => {
       ui.column("hud-objective", () => {
-        ui.style("obj-title").label(lines.objective);
-        if (!isPhone) ui.style("obj-sub").label(A.objectiveSub());
+        ui.style(__l10nStyle("obj-title")).label(lines.objective);
+        if (!isPhone) ui.style(__l10nStyle("obj-sub")).label(A.objectiveSub());
       }, { style: "hud-objective", width, spacing: 0 });
     };
     const turn = (): void => {
       if (!lines.turn) return;
-      ui.row("hud-turn", () => ui.style(lines.tone === "yours" ? "turn-yours-text" : lines.tone === "theirs" ? "turn-theirs-text" : "turn-text").label(lines.turn),
+      ui.row("hud-turn", () => ui.style(__l10nStyle(lines.tone === "yours" ? "turn-yours-text" : lines.tone === "theirs" ? "turn-theirs-text" : "turn-text")).label(lines.turn),
         { style: lines.tone === "yours" ? "hud-turn-yours" : lines.tone === "theirs" ? "hud-turn-theirs" : "hud-turn", align: "center" });
     };
     const toggles = (): void => {
       if (wide()) return;
-      if (ui.id("drawer-left").style("btn-ghost").button(T("Toggle fleet panel"), { selected: app.drawer === "left", content: () => ui.label("☰") })) { A.play("ui-press"); app.drawer = app.drawer === "left" ? null : "left"; }
-      if (ui.id("drawer-right").style("btn-ghost").button(T("Toggle log panel"), { selected: app.drawer === "right", content: () => ui.label("≡") })) { A.play("ui-press"); app.drawer = app.drawer === "right" ? null : "right"; }
+      if (ui.id("drawer-left").style(__l10nStyle("btn-ghost")).button(T("Toggle fleet panel"), { selected: app.drawer === "left", content: () => ui.label("☰") })) { A.play("ui-press"); app.drawer = app.drawer === "left" ? null : "left"; }
+      if (ui.id("drawer-right").style(__l10nStyle("btn-ghost")).button(T("Toggle log panel"), { selected: app.drawer === "right", content: () => ui.label("≡") })) { A.play("ui-press"); app.drawer = app.drawer === "right" ? null : "right"; }
     };
     const inner = VW - pad.start - pad.end;
     if (isPhone) {
@@ -401,7 +414,7 @@ function fleetRail(w: number): void {
     const label = isMe ? T("Your fleet") : pname(p.name);
     heading(p.alive ? label : T("{name} — eliminated", { name: label }), "rail-h");
     const row = (id: string, a: string, b: string, sunk = false): void => {
-      ui.row(id, () => { ui.style(sunk ? "fleet-sunk" : "fleet-text").label(a); ui.spacer(); ui.style(sunk ? "fleet-sunk" : "fleet-text").label(b); }, { width: w, style: "fleet-row", align: "center" });
+      ui.row(id, () => { ui.style(__l10nStyle(sunk ? "fleet-sunk" : "fleet-text")).label(a); ui.spacer(); ui.style(__l10nStyle(sunk ? "fleet-sunk" : "fleet-text")).label(b); }, { width: w, style: "fleet-row", align: "center" });
     };
     if (isMe) for (const s of p.ships) row(`ship-${p.id}-${s.id}`, pname(s.name), "●".repeat(s.hits) + "○".repeat(s.size - s.hits), s.sunk);
     else {
@@ -492,7 +505,7 @@ function tray(): void {
   if (left) items = items.slice().reverse();
   const w = VW - 20;
   const r = ui.place("tray", { anchor: "bottom", y: 0 }, () => {
-    if (!items.length) { ui.style("resolving").label(T("Resolving…")); return; }
+    if (!items.length) { ui.style(__l10nStyle("resolving")).label(T("Resolving…")); return; }
     ui.id("tray-bar").column(T("Actions"), () => {
       buttonRows("tray-buttons", items, w - 22, { gap: phone() ? 6 : 8, justify: left ? "end" : "center" });
     }, { width: w - 22 });
@@ -514,13 +527,13 @@ function chartOverlay(): void {
         for (let i = 0; i < g; i++) {
           const col = render.projectCell("main", i, f.width, f.height);
           const row = render.projectCell("main", i * g, f.width, f.height);
-          if (col.visible) draw.text(String.fromCharCode(65 + i), col.x, col.y - 22 * s - 6 * s, opts);
-          if (row.visible) draw.text(String(i + 1), row.x - 26 * s, row.y - 6 * s, opts);
+          if (col.visible) draw.text(String.fromCharCode(65 + i), col.x, col.y - 22 * s - 6 * s, __l10nDrawOptions(opts));
+          if (row.visible) draw.text(String(i + 1), row.x - 26 * s, row.y - 6 * s, __l10nDrawOptions(opts));
         }
         for (const [cellStr, mark] of Object.entries(notes)) {
           const p = render.projectCell("main", Number(cellStr), f.width, f.height);
           if (!p.visible) continue;
-          draw.text(mark === "flag" ? "⚑" : "?", p.x, p.y - 22 * s, { size: 18 * s, color: mark === "flag" ? "#ffc857" : "#cfe8ff", align: "center", weight: "bold", shadow: { color: "#000000", x: 0, y: 1 * s } });
+          draw.text(mark === "flag" ? "⚑" : "?", p.x, p.y - 22 * s, __l10nDrawOptions({ size: 18 * s, color: mark === "flag" ? "#ffc857" : "#cfe8ff", align: "center", weight: "bold", shadow: { color: "#000000", x: 0, y: 1 * s } }));
         }
       },
     });
@@ -532,7 +545,7 @@ function gameHud(): void {
   hudTop();
   tray();
   rails();
-  if (app.countdown) ui.place("countdown", "center", () => ui.style("countdown").label(String(app.countdown!.n)));
+  if (app.countdown) ui.place("countdown", "center", () => ui.style(__l10nStyle("countdown")).label(String(app.countdown!.n)));
   // The chart is fitted inside what the HUD leaves (scene.js _safeInsets).
   const f = frame();
   if (f.width > 0 && f.height > 0) {
@@ -572,11 +585,11 @@ function card(id: string, title: string, width: number, body: (w: number) => voi
 function pauseDialog(): void {
   card("pause", T("Paused"), 380, (w) => {
     ui.column("pause-actions", () => {
-      if (ui.id("resume").style("btn-primary").button(T("Resume"))) A.pauseAction("resume");
-      if (ui.id("p-settings").style("btn").button(T("Settings"))) A.pauseAction("settings");
-      if (ui.id("p-help").style("btn").button(T("Help"))) A.pauseAction("help");
-      if (app.mode === "practice" && ui.id("restart").style("btn").button(T("Restart match"))) A.pauseAction("restart");
-      if (ui.id("leave").style("btn-danger").button(T("Leave match"))) A.pauseAction("leave");
+      if (ui.id("resume").style(__l10nStyle("btn-primary")).button(T("Resume"))) A.pauseAction("resume");
+      if (ui.id("p-settings").style(__l10nStyle("btn")).button(T("Settings"))) A.pauseAction("settings");
+      if (ui.id("p-help").style(__l10nStyle("btn")).button(T("Help"))) A.pauseAction("help");
+      if (app.mode === "practice" && ui.id("restart").style(__l10nStyle("btn")).button(T("Restart match"))) A.pauseAction("restart");
+      if (ui.id("leave").style(__l10nStyle("btn-danger")).button(T("Leave match"))) A.pauseAction("leave");
     }, { spacing: 10, width: w, align: "stretch" });
   });
 }
@@ -611,12 +624,12 @@ function settingsDialog(): void {
       ui.column("fs-learn", () => {
         lbl(T("Learning"), "legend");
         para(T(A.doc().tutorial.done ? "Tutorial progress: complete." : "Tutorial progress: not finished."), cw - 26);
-        if (ui.id("replay-tutorial").style("btn").button(T("Replay tutorial"))) { A.play("ui-press"); app.modals = []; A.startLesson(LESSONS[0]); }
+        if (ui.id("replay-tutorial").style(__l10nStyle("btn")).button(T("Replay tutorial"))) { A.play("ui-press"); app.modals = []; A.startLesson(LESSONS[0]); }
       }, { style: "fieldset", width: cw, spacing: 6 });
     }, { columns: cols, gap: { row: 8, column: 24 }, width: w, align: "stretch" });
     para(T("Sound volumes, graphics quality, frame rate, controls, language, text size, high contrast and reduced motion are in the StarHermit Options (F1)."), w, "small");
   }, (w) => buttonRows("settings-foot", [
-    { id: "sh-options", label: T("StarHermit Options"), run: () => openMenu() },
+    { id: "sh-options", label: T("StarHermit Options"), run: () => __l10nOptions() },
     { id: "done", label: T("Done"), cls: "btn-primary", cue: "ui-back", run: () => A.closeModal() },
   ], w, { justify: "end" }));
 }
@@ -661,7 +674,7 @@ function resetDialog(): void {
 }
 function handoverDialog(m: Extract<A.Modal, { kind: "handover" }>): void {
   card("handover", T("Pass the chart"), 460, (w) => {
-    ui.style("text", { text: { align: "center" } }).paragraph(T("Hand the device to {name}. The fleet positions are secret — no peeking.", { name: m.name }), w);
+    ui.style(__l10nStyle("text"), __l10nStyle({ text: { align: "center" } })).paragraph(T("Hand the device to {name}. The fleet positions are secret — no peeking.", { name: m.name }), w);
   }, (w) => buttonRows("handover-foot", [{ id: "ready", label: T("I am {name} — ready", { name: m.name }), cls: "btn-primary", cue: null, run: () => A.handoverReady() }], w), false);
 }
 function resultsDialog(): void {
@@ -669,13 +682,13 @@ function resultsDialog(): void {
   if (!v) return;
   card("results", "", 560, (w) => {
     if (VH >= 560) ui.column("results-art", () => { /* the illustration is the box's background */ }, { width: w, height: Math.min(200, VH * 0.22, w * 9 / 16), style: v.tone === "win" ? "results-win-img" : "results-lose-img" });
-    ui.style(v.tone === "win" ? "result-win" : v.tone === "loss" ? "result-loss" : "result-draw").heading(v.headline);
-    if (v.stars !== null) ui.id("stars").row(T("{n} of 3 stars", { n: v.stars }), () => ui.style("stars").label("★".repeat(v.stars) + "☆".repeat(3 - v.stars)));
+    ui.style(__l10nStyle(v.tone === "win" ? "result-win" : v.tone === "loss" ? "result-loss" : "result-draw")).heading(v.headline);
+    if (v.stars !== null) ui.id("stars").row(T("{n} of 3 stars", { n: v.stars }), () => ui.style(__l10nStyle("stars")).label("★".repeat(v.stars) + "☆".repeat(3 - v.stars)));
     if (v.challenge) para(v.challenge, w);
     ui.grid(T("Score breakdown"), () => {
-      for (const r of v.rows) { lbl(r.label, "text"); ui.style("text", { text: { align: "end" } }).label(`${r.points > 0 ? "+" : ""}${r.points}`); }
-      ui.gridRow("score-total").style("score-total-text").label(T("Total"));
-      ui.style("score-total-text", { text: { align: "end" } }).label(String(v.total));
+      for (const r of v.rows) { lbl(r.label, "text"); ui.style(__l10nStyle("text"), __l10nStyle({ text: { align: "end" } })).label(`${r.points > 0 ? "+" : ""}${r.points}`); }
+      ui.gridRow("score-total").style(__l10nStyle("score-total-text")).label(T("Total"));
+      ui.style(__l10nStyle("score-total-text"), __l10nStyle({ text: { align: "end" } })).label(String(v.total));
     }, { columns: [{ fr: 1 }, { width: "auto", align: "end" }], gap: { row: 0, column: 12 }, width: w, rowStyle: "score-row" });
     if (app.lbLine) para(app.lbLine, w, "dim");
     para(v.facts, w, "small");

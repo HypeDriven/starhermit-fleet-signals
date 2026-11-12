@@ -1,3 +1,5 @@
+// localization-runtime:attached
+import { localizedCanvasFont as __l10nCanvasFont } from "./l10n/font.ts";
 // The holographic chart table over a stylized procedural sea on
 // starhermit:scene, ported from the browser build's three.js renderer
 // (src/render/scene.js before the port): the steel pedestal with its glowing
@@ -124,7 +126,7 @@ function makeChartTexture(n: number): Texture | null {
   }
   g.globalAlpha = 0.9;
   g.fillStyle = "#fff";
-  g.font = "bold 34px sans-serif";
+  g.font = __l10nCanvasFont("bold 34px sans-serif");
   g.textAlign = "center";
   g.textBaseline = "middle";
   for (const [t, a] of [["N", -PI / 2], ["E", 0], ["S", PI / 2], ["W", PI]] as [string, number][]) {
