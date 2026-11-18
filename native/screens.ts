@@ -1,3 +1,4 @@
+import { bindings } from "starhermit:input";
 import { localizedStyle as __l10nStyle } from "./l10n/font.ts";
 import { localizedDrawOptions as __l10nDrawOptions } from "./l10n/font.ts";
 // localization-runtime:attached
@@ -714,7 +715,7 @@ function dialogs(): void {
 }
 
 // ------------------------------------------------------------------ the frame
-export function drawScreens(): void {
+function drawScreensImmediate(): void {
   measureViewport();
   switch (app.screen) {
     case "title": titleScreen(); break;
@@ -731,4 +732,11 @@ export function drawScreens(): void {
   if (app.screen !== "game" || hudRects.top > 0) A.showToasts(Math.max(0, (app.screen === "game" ? hudRects.top / SCALE + 6 : 70) - 16));
   captionLine();
   dialogs();
+}
+
+export function drawScreens(): void {
+  if (!(app.modals.some((modal) => modal.kind === "help"))) { drawScreensImmediate(); return; }
+  const actions = ["left","right","up","down","confirm","cancel","rotate","auto_deploy","notes","hint","undo","camera","pause"];
+  const version = JSON.stringify([(app as any).settings ?? (app as any).options ?? {}, (platform as any).options ?? {}, actions.map((action) => bindings(action))]);
+  ui.retain!("help-screen", version, drawScreensImmediate);
 }
