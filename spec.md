@@ -1,6 +1,6 @@
 # Fleet Signals — Game Design Document (running spec)
 
-**Status:** shipped; this document describes the game as it runs today (present tense), a StarHermit engine script game pinned to engine 1.44.1 (host API 1.44, `engine.minor=44`).
+**Status:** shipped; this document describes the game as it runs today (present tense), a StarHermit engine script game pinned to engine 1.47.0 (host API 1.47, `engine.minor=47`).
 **Version markers:** rules v3 (`RULES_VERSION`), content v1 (`CONTENT_VERSION`), save v2 (`SAVE_VERSION`), replay schema 1.
 
 ## 1. Overview
@@ -19,8 +19,8 @@
 
 | Path | Responsibility |
 |---|---|
-| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, `cover=cover.jpg`, `launch=index.html`, `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.44.1`, `engine.minor=44`, `engine.capabilities=platform,storage,clipboard`, `control.*` + `engine.gamepad.*` for every action, `engine.group.*` headings |
-| `index.html`, `starhermit-files.json` | The engine's web loader (pins engine 1.44.1 on wiki.starhermit.com by hash) and the package file index, both written by `npm run package` (`starhermit package --web .`); never edited by hand |
+| `starhermit.txt` | Manifest: name, description, owner, `server=score-script.js`, `cover=cover.jpg`, `launch=index.html`, `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.47.0`, `engine.minor=47`, `engine.capabilities=platform,storage,clipboard`, `control.*` + `engine.gamepad.*` for every action, `engine.group.*` headings |
+| `index.html`, `starhermit-files.json` | The engine's web loader (pins engine 1.47.0 on wiki.starhermit.com by hash) and the package file index, both written by `npm run package` (`starhermit package --web .`); never edited by hand |
 | `native/main.ts` | Entry: start-up (language, styles, platform, look, sounds), the fixed 60 Hz game clock, key/pad actions, pointer and touch on the chart (tap = pick, drag = orbit), the frame loop |
 | `native/app.ts` | Controller (the browser build's `App` without its DOM): screens, match lifecycle (placement editor, countdown, battle, AI pump, hot-seat handover, lessons, results, progression, achievements, local board, leaderboard post, resume), toasts/captions/announcements; timers on the game clock |
 | `native/screens.ts` | Every screen, dialog and the match HUD on `starhermit:ui` (title, setup, Journey, Challenges, Learn, Hosted Table lobby, profile, pause, settings, help, reset, handover, results; top bar, rails/drawers, tray, countdown, toasts, captions, the chart's A–J / 1–10 labels and note marks) |
@@ -227,7 +227,7 @@ Conventions follow https://wiki.starhermit.com/ (engine tutorial). Standalone (s
 
 | Feature | Status in this build |
 |---|---|
-| Manifest / launch | `starhermit.txt` (see §1); the web loader `index.html` pins engine 1.44.1 |
+| Manifest / launch | `starhermit.txt` (see §1); the web loader `index.html` pins engine 1.47.0 |
 | Identity | `player()`: signed in, the profile shows "Signed in as <display name>" with the sync state; guests see Offline. The local display name (Profile, 18 chars) names your seat in matches |
 | Sign-in / invite | Title: **Sign in with StarHermit** (`requestSignIn`) when signed out; **Invite a friend** (the invite link, copied with `clipboard.writeText`) when signed in |
 | Cloud save | The v2 save document is the game's `saves` save (schema 2): on the device and in the account, uploads debounced by the runtime; a conflict merges both copies (`mergeDocs`: strict descendant, else `combineSaves`). The browser build's slot (`game:<slug>`, the JS SDK's `saveJSON` text) shows as foreign: it is read (v1 migrated), merged in and replaced once (`replaceForeign`). A match in progress is a device-only snapshot (`storage`, `fleet-signals-resume`). Old browser localStorage progress of guests does not migrate |
@@ -289,8 +289,12 @@ The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-S
 
 <!-- regional-localization:end -->
 
-## Engine 1.44.1
+## Engine 1.47.0
 
-Browser play uses the WebGPU-only StarHermit 1.44.1 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
+Browser play uses the WebGPU-only StarHermit 1.47.0 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
 
 The help screen replays through retained native UI while its contents, options, layout and key bindings are unchanged.
+
+Browser rendering uses the engine's asynchronous pipeline creation so newly encountered materials do not stall the page. Native play retains the engine's synchronous pipeline behavior.
+
+Higher graphics tiers use native per-object motion blur for moving pieces and effects. Camera motion stays sharp, lower tiers omit the effect, and the runtime's Motion blur and Reduce motion preferences remain authoritative.
