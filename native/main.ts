@@ -1,3 +1,4 @@
+import { showCursor } from "./cursor.ts";
 import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // Fleet Signals on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
@@ -26,6 +27,7 @@ const STEP_MS = 1000 / 60;
 setSessionClock(() => A.clock.ms);
 
 onStart(() => {
+  showCursor();
   setFixedRate(60);
   initStyles();
   platform.initPlatform();
