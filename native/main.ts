@@ -7,8 +7,8 @@ import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // src/platform/save.js), unchanged in behaviour; the screens and HUD are
 // starhermit:ui (screens.ts), the chart table and sea starhermit:scene
 // (render.ts), the controller app.ts, saves and the platform platform.ts.
-import { frame, levelSettings, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate, strings } from "starhermit:engine";
-import { gamepads, onAction, onPointerButton, onPointerMove, onTouch } from "starhermit:input";
+import { frame, levelSettings, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate, setTargetFps, strings } from "starhermit:engine";
+import { gamepads, onAction, onPointerButton, onPointerMove, onTouch, primaryPointer } from "starhermit:input";
 import { onSessionEnded } from "starhermit:platform";
 import * as ui from "starhermit:ui";
 import { setSessionClock } from "../src/session/session.js";
@@ -165,9 +165,20 @@ onFixedUpdate(() => {
 });
 let frameDt = 0;
 let padSeen = false;
+/** The game's frame cap (host API 1.49 setTargetFps, set only on a change): 30 on phone levels
+ * (levelIndex <= 3) under a finger, none otherwise. The menus keep the display rate: the chart
+ * table stays in view behind them. The match clock stays 60 fixed steps a second. */
+let frameCap = -1;
+function capFrames(): void {
+  const cap = frame().levelIndex <= 3 && primaryPointer() === "coarse" ? 30 : 0;
+  if (cap === frameCap) return;
+  frameCap = cap;
+  setTargetFps(cap || null);
+}
 onUpdate((dt) => {
   frameDt = dt;
   applyLook();
+  capFrames();
   audio.update();
   // The first pad (App._wireGamepad's connection toast).
   if (!padSeen && gamepads().some((g) => g.connected)) { padSeen = true; A.toast(T("Gamepad connected — stick aims, A confirms, B cancels.")); }

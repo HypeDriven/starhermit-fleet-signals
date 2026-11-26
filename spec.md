@@ -291,10 +291,14 @@ The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-S
 
 ## Engine 1.50.0
 
-Browser play uses the WebGPU-only StarHermit 1.50.0 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
+Browser play uses the StarHermit 1.50.0 web runtime on WebGPU, or WebGL 2 where WebGPU is missing. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
 
 The help screen replays through retained native UI while its contents, options, layout and key bindings are unchanged.
 
 Browser rendering uses the engine's asynchronous pipeline creation so newly encountered materials do not stall the page. Native play retains the engine's synchronous pipeline behavior.
+
+**Frame rate (host API 1.49 `setTargetFps`).** Under a finger (`primaryPointer() === "coarse"`) the game caps itself at 30 frames a second on the phone graphics levels (`levelIndex` ≤ 3), where even 33 ms frames replace uneven ones; elsewhere, the title included (the chart table stays in view behind it), there is no game cap. The match clock stays 60 fixed steps a second whatever the frame rate. The engine sets the cap aside while its menus are open, and the player's Frame rate limit still applies.
+
+**Still scenery and the engine clock (host API 1.49).** The chart table (pedestal, rim, surface, engraving and sweep disc) and each board's plate and grid lines are `movable = false`, so the renderer caches them in shadow maps from the first frame and the scene's sync skips their transforms. Ships, markers, the cursor, buoys, the sea and the particles stay movable. The sea's waves and ripples run on the engine's `frame_time()` less an offset, held while the game is paused, so the water material is sent only when the sea starts or holds, not every frame.
 
 Higher graphics tiers use native per-object motion blur for moving pieces and effects. Camera motion stays sharp, lower tiers omit the effect, and the runtime's Motion blur and Reduce motion preferences remain authoritative.

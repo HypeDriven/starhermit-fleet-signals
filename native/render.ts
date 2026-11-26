@@ -38,6 +38,7 @@ import {
 } from "starhermit:scene";
 import type { Material, Texture } from "starhermit:scene";
 import { OffscreenCanvas } from "starhermit:canvas";
+import { frame as engineFrame } from "starhermit:engine";
 import { makeRng } from "../src/rules/rng.js";
 import { cellToXY } from "../src/rules/engine.js";
 import { PARTICLE_CAP, SEA_SIMPLE, type Budget, type Look } from "./quality.ts";
@@ -337,7 +338,7 @@ const WATER_VERTEX = `${WATER_COMMON}
 fn vertex(v: Vertex) -> Vertex {
   var o = v;
   let p = v.position.xz;
-  let t = uniforms.uTime;
+  let t = select(uniforms.uFrozen, frame_time() - uniforms.uOffset, uniforms.uRun > 0.5);
   let h = fs_wave(p, t);
   let e = 0.35;
   let hx = fs_wave(p + vec2f(e, 0.0), t) - h;
@@ -356,7 +357,7 @@ fn fragment(f: Fragment) -> vec4f {
   let dist = length(cam - f.world);
   if (uniforms.uDetail > 0.5) {
     let p = f.world.xz;
-    let t = uniforms.uTime;
+    let t = select(uniforms.uFrozen, frame_time() - uniforms.uOffset, uniforms.uRun > 0.5);
     let fade = exp(-dist * 0.035);
     let nx = cos(p.x * 2.3 + t * 1.6 + sin(p.y * 0.9)) + 0.6 * cos((p.x - p.y) * 3.7 + t * 2.4);
     let nz = cos(p.y * 2.9 - t * 1.3 + sin(p.x * 1.2)) - 0.6 * cos((p.x - p.y) * 3.7 + t * 2.4);
@@ -378,7 +379,8 @@ fn fragment(f: Fragment) -> vec4f {
 }`;
 const ripples = Array.from({ length: 8 }, () => new Vector4(0, 0, -10, 0));
 const waterUniforms = {
-  uTime: { value: 0 },
+  // The sea's clock is the engine's (frame_time()) less uOffset while it runs, uFrozen while held.
+  uRun: { value: 0 }, uOffset: { value: 0 }, uFrozen: { value: 0 },
   uRipples: { value: ripples as readonly Vector4[] },
   uDeep: { value: new Color(0x06283d) },
   uShallow: { value: new Color(0x1a5d7a) },
@@ -482,6 +484,7 @@ function build(): void {
   sweep.visible = false;
   sweep.noAO = true;
   table.add(pedestal, rim, surface, engraving, sweep);
+  table.movable = false; // the chart table never moves (its LODs swap geometry, not place)
   scene.add(table);
 
   // decoration from the deterministic visual stream
@@ -624,6 +627,7 @@ function buildGridBoard(gridSize: number, color: Color): Board {
   plate.receiveShadow = true;
   plate.position.y = -0.03;
   plate.noAO = true;
+  plate.movable = false;
   group.add(plate);
   const lineMat = new MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.9, transparent: true, opacity: 0.55, roughness: 0.4 });
   const lines = new InstancedMesh(new BoxGeometry(0.025, 0.02, span), lineMat, (gridSize + 1) * 2);
@@ -637,6 +641,7 @@ function buildGridBoard(gridSize: number, color: Color): Board {
   }
   lines.instanceMatrix.needsUpdate = true;
   lines.noAO = true;
+  lines.movable = false;
   group.add(lines);
   const markers = new Group();
   group.add(markers);
@@ -1282,6 +1287,20 @@ function makeShotJob(dest: Vector3, result: string, delayMs: number): Job {
     settle(): void { if (!this.done) removeMesh(proj); this.done = true; },
   };
 }
+/** Runs or holds the sea's clock (`time`, which ripples are stamped with): the engine's frame().time
+ * less an offset while the game runs, held while it is paused; the water uniforms change only then. */
+let clockRun = false, clockOffset = 0;
+function seaClock(run: boolean, dt: number): void {
+  const now = engineFrame().time;
+  if (run !== clockRun) {
+    if (run) clockOffset = now - (time + dt); // on from where it held, one frame on (as time += dt went)
+    clockRun = run;
+    waterUniforms.uRun.value = run ? 1 : 0;
+    waterUniforms.uOffset.value = clockOffset;
+    waterUniforms.uFrozen.value = time;
+  }
+  if (run) time = now - clockOffset;
+}
 function addRipple(pos: Vector3, strength: number): void {
   rippleCursor = (rippleCursor + 1) % 8;
   ripples[rippleCursor]!.set(pos.x, pos.z, time, strength);
@@ -1304,9 +1323,8 @@ export function update(dtRaw: number, width: number, height: number, paused: boo
     const a = width / height;
     if (Math.abs(a - aspect) > 1e-4) { aspect = a; camera.aspect = a; camera.updateProjectionMatrix(); refit(); }
   }
+  seaClock(!paused, dt);
   if (paused) { updateCamera(0); return; }
-  time += dt;
-  waterUniforms.uTime.value = time;
   if (jobs.length) jobs = jobs.filter((j) => !j.update(dt));
   if (ambient) animateAmbient();
   for (const p of pools) p.update(dt);
