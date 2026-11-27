@@ -12,7 +12,7 @@
     "metadataSource": "starhermit.txt",
     "createdAt": "2026-09-01T07:01:00.509637+00:00",
     "coverArtSource": "manifest",
-    "coverArtUpdatedAt": "2026-11-26T20:36:20.898293+00:00",
+    "coverArtUpdatedAt": "2026-11-27T17:06:38.32223+00:00",
     "submittedByUserId": "2712e04e-461b-4d23-81ae-e40b429128a8",
     "submittedByUsername": "starhermit",
     "hosting": {
@@ -22,9 +22,9 @@
       "pinnedCommitSha": null,
       "deployedCommitSha": null,
       "deployError": null,
-      "deployedAt": "2026-11-26T20:36:20.8861+00:00",
+      "deployedAt": "2026-11-27T17:06:38.312679+00:00",
       "externalLaunchUrl": null,
-      "engineVersion": "1.51.0",
+      "engineVersion": "1.53.0",
       "deployWarning": null
     },
     "description": "Hide your fleet and call coordinates to locate and sink enemy ships before your own are discovered.",
@@ -36,19 +36,19 @@
     "links": [],
     "isDisabled": false
   },
-  "publishedAt": "2026-11-26T20:36:21.081Z",
-  "sourceCommit": "3bddbdc9af42996482f4136033ad2a5bbda33dd4",
-  "bytesReceived": 4878854,
-  "archiveSha256": "5655094392ce07551ab1f2fb2fa08f3a0308db032442b4f74565516c2efed35e",
+  "publishedAt": "2026-11-27T17:06:38.489Z",
+  "sourceCommit": "e8296194e355b9bf0b92f366e4ac1997637afc3d",
+  "bytesReceived": 4878807,
+  "archiveSha256": "7b07e892cf82ffee34b9cafd71ee94c4849fbe7d97445403ddc55de56caa8d7a",
   "indexSha256": "354a52d6064ee4bc56a8ae7199956e0e1fd132b39d62cf3fefd18c749a182343",
   "result": {
     "clientPublished": true,
     "serverImageLoaded": false,
     "imageDigest": null,
-    "bytesReceived": 4878854,
+    "bytesReceived": 4878807,
     "mode": "replace",
     "filesRemoved": 0,
-    "engineVersion": "1.51.0",
+    "engineVersion": "1.53.0",
     "deployWarning": null
   },
   "liveVerification": {
